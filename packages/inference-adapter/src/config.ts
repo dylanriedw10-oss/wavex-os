@@ -68,5 +68,45 @@ export function applyInferenceEnv(): InferenceConfig {
   if (process.env.WAVEX_INFERENCE_TRACK === undefined && cfg.mode === "oauth") {
     process.env.WAVEX_INFERENCE_TRACK = "1";
   }
+  warnOnCredentialScope(cfg.mode);
   return cfg;
+}
+
+let scopeWarned = false;
+
+/** Say out loud which credential is about to serve inference.
+ *
+ *  The mode is otherwise invisible: it resolves from an env var with a
+ *  fallback, picks a bin, and nothing in the logs distinguishes "this
+ *  operator's own subscription" from "a subscription answering other
+ *  people's requests." Only the second one is a policy problem, and it is
+ *  the one you cannot see. So print it once at boot.
+ *
+ *  The rule (Anthropic, Legal and compliance): a Free/Pro/Max credential
+ *  serves ordinary use by its own purchaser. It may not be used to route
+ *  requests "on behalf of their users." See docs/INFERENCE_COMPLIANCE.md. */
+function warnOnCredentialScope(mode: InferenceConfig["mode"]): void {
+  if (scopeWarned || process.env.WAVEX_INFERENCE_SCOPE_QUIET === "1") return;
+  scopeWarned = true;
+
+  if (mode === "hosted") {
+    console.warn(
+      "[inference] hosted mode: requests will be served by the operator's Claude\n" +
+      "[inference] subscription via the inference hub. If any of those requests\n" +
+      "[inference] originate from someone who is not that subscription's purchaser,\n" +
+      "[inference] this is the pattern Anthropic prohibits — routing through Free/Pro/\n" +
+      "[inference] Max credentials on behalf of users. Serve customers from an API key\n" +
+      "[inference] (WAVEX_INFERENCE_MODE=apikey). See docs/INFERENCE_COMPLIANCE.md.",
+    );
+    return;
+  }
+  if (mode === "oauth") {
+    console.warn(
+      "[inference] oauth mode: inference runs on the local operator's own Claude\n" +
+      "[inference] subscription. Correct for a single operator on their own machine.\n" +
+      "[inference] Do not serve another party's requests from this process, and prefer\n" +
+      "[inference] apikey mode for unattended or scheduled runs — subscription limits\n" +
+      "[inference] describe ordinary individual use. See docs/INFERENCE_COMPLIANCE.md.",
+    );
+  }
 }

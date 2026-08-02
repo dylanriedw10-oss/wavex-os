@@ -113,7 +113,7 @@ If a frozen path needs to change to complete a task, **STOP** and surface the co
 |---|---|---|---|
 | `WAVEX_AUTH_MODE` | `dev` | `production` | Auth gate behavior (dev bypass / Better-Auth) |
 | `WAVEX_COMPOSIO_DISABLED` | `1` (auto if `NODE_ENV!=production`) | unset | Composio integration disable |
-| `WAVEX_INFERENCE_MODE` | `oauth` | `apikey` | Tier-router claudeBin source |
+| `WAVEX_INFERENCE_MODE` | `oauth` | `apikey` | Tier-router claudeBin source — **`oauth`/`hosted` serve inference from a Claude subscription; a subscription may only serve its own purchaser. See [`docs/INFERENCE_COMPLIANCE.md`](./docs/INFERENCE_COMPLIANCE.md)** |
 | `WAVEX_DB_DRIVER` | `pglite` | `pg` | Drizzle backend |
 | `WAVEX_DB_DATA_DIR` | `~/.wavex-os/db/pglite` | n/a | PGlite data dir |
 | `DATABASE_URL` | n/a | required when `WAVEX_DB_DRIVER=pg` | Postgres connection string |
@@ -169,3 +169,4 @@ to upstream and does not change between dev and production.
 - [`docs/ops/surface-tuning-map.md`](./docs/ops/surface-tuning-map.md) — 40 tunables (auto-generated)
 - [`docs/MINIMAL_INCEPTION.md`](./docs/MINIMAL_INCEPTION.md) — kernel topology
 - [`docs/SELF_HEALING.md`](./docs/SELF_HEALING.md) — runtime recovery
+- [`docs/INFERENCE_COMPLIANCE.md`](./docs/INFERENCE_COMPLIANCE.md) — which credential may serve whose request

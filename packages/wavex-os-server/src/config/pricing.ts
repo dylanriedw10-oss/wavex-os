@@ -26,7 +26,7 @@ export const TIERS: TierConfig[] = [
     priceLabel: "$0 / 14 days",
     priceCents: 0,
     features: [
-      "14 prompt injections",
+      "14 board directives",
       "Trial capacity (200K tokens)",
       "Full live preview",
     ],
@@ -39,7 +39,7 @@ export const TIERS: TierConfig[] = [
     priceLabel: "$29 / month",
     priceCents: 2900,
     features: [
-      "30 prompt injections / mo",
+      "30 board directives / mo",
       "Solo founder capacity (500K tokens / mo)",
       "Weekly performance audit",
     ],
@@ -52,7 +52,7 @@ export const TIERS: TierConfig[] = [
     priceLabel: "$99 / month",
     priceCents: 9900,
     features: [
-      "200 prompt injections / mo",
+      "200 board directives / mo",
       "Team capacity (2M tokens / mo)",
       "Daily performance enforcement",
     ],
@@ -65,7 +65,7 @@ export const TIERS: TierConfig[] = [
     priceLabel: "$299 / month",
     priceCents: 29900,
     features: [
-      "Unlimited prompt injections",
+      "Unlimited board directives",
       "Enterprise capacity (unlimited tokens)",
       "Dedicated WaveX Agent",
       "White-glove launch + VC arm",

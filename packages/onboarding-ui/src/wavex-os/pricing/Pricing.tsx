@@ -89,7 +89,7 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
     <div style={containerStyle}>
       <H2>System Optimizer subscription</H2>
       <P>
-        Strategic prompt injections to your CEO. Your WaveX Agent monitors performance and intervenes when agents drift.
+        Strategic directives to your CEO. Your WaveX Agent monitors performance and intervenes when agents drift.
       </P>
 
       <div style={{

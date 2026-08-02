@@ -192,7 +192,7 @@ export default function MissionControl() {
                 <li>Approvals tray (board approvals routed via Telegram + UI)</li>
                 <li>Workspace tray (ngrok status, Composio health, etc.)</li>
                 <li>Real Paperclip core in place of mock-core</li>
-                <li>System Optimizer daily injections</li>
+                <li>System Optimizer daily directives</li>
               </ul>
             </div>
 

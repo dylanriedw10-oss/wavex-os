@@ -1,5 +1,23 @@
 # Inference Auth — Mac mini as the WaveX inference provider
 
+> [!WARNING]
+> **The Pool A decision on this page is superseded — see
+> [`INFERENCE_COMPLIANCE.md`](./INFERENCE_COMPLIANCE.md).**
+>
+> This document decides to serve *customer* inference from the operator's
+> Claude Max OAuth, and names that arbitrage as the business model. Anthropic's
+> Legal and compliance page states that Anthropic "does not permit third-party
+> developers to offer Claude.ai login or to route requests through Free, Pro, or
+> Max plan credentials on behalf of their users" — which is this design. The
+> cost case has also lapsed: subscription entitlements brought to third-party
+> software meter at standard API rates, so there is no discount left to
+> arbitrage. Pool B already moved to BYOC for a closely related reason.
+>
+> The auth mechanics below (install attestation, ed25519 manifest signing,
+> Turnstile, per-email caps) remain sound and carry over unchanged to an
+> API-key-backed pool. It is the *credential* that has to change, not the
+> gatekeeping.
+
 How a customer's `wavex-os` instance authenticates to the Mac mini's inference server such that:
 
 1. Only legitimate `wavex-os` installs can call Pool A (free onboarding inference)
