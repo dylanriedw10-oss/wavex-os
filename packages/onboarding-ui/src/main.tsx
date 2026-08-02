@@ -7,6 +7,7 @@ import Pricing from "./pages/Pricing";
 import TonyApplePricing from "./pages/TonyApplePricing";
 import DesignPartners from "./pages/DesignPartners";
 import { Signup } from "./pages/Signup";
+import CanvasPage from "./canvas/CanvasPage";
 import { CompanyProvider } from "./wavex-os/lib/CompanyContext";
 import { OnboardingShell } from "./wavex-os/pages/OnboardingShell";
 import { OnboardingWizard } from "./wavex-os/components/OnboardingWizard";
@@ -39,6 +40,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/lp/design-partners" element={<DesignPartners />} />
             <Route path="/wavex-pricing" element={<Pricing />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/canvas" element={<CanvasPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </CompanyProvider>

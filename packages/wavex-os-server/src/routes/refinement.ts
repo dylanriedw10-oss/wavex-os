@@ -26,6 +26,8 @@ import {
 } from "@wavex-os/plugin-onboarding";
 import { route as tierRoute } from "@wavex-os/plugin-tier-router";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
+import { withTokenAccounting } from "../lib/token-accounting.js";
+import { BudgetExhaustedError } from "../lib/token-budget.js";
 import { getOnboardingDir } from "../state-bridge.js";
 import { buildAnalyzeRefinementPrompt } from "../refinement/analyze-prompt.js";
 import { parseAnalyzeResponse } from "../refinement/parse.js";
@@ -101,19 +103,26 @@ export function registerRefinementRoutes(app: FastifyInstance): void {
     const prompt = buildAnalyzeRefinementPrompt(manifest, parsed.data.operatorGuidance);
     let raw: string;
     try {
-      const resp = await tierRoute({
-        agent_id: "onboarding.refinement.analyze",
-        prompt,
-        task_metadata: {
-          creativity_required: false, customer_facing: false,
-          reasoning_depth: "deep", priority: "high",
-        },
-        companyId: parsed.data.companyId,
-        outputFormat: "json",
-        timeout_ms: 120_000,
+      // Budgeted + attributed like every other T2 call site — this one had
+      // slipped through unaccounted (fixed in the pivot pass).
+      raw = await withTokenAccounting(parsed.data.companyId, "refinement", async () => {
+        const resp = await tierRoute({
+          agent_id: "onboarding.refinement.analyze",
+          prompt,
+          task_metadata: {
+            creativity_required: false, customer_facing: false,
+            reasoning_depth: "deep", priority: "high",
+          },
+          companyId: parsed.data.companyId,
+          outputFormat: "json",
+          timeout_ms: 120_000,
+        });
+        return resp.output;
       });
-      raw = resp.output;
     } catch (e) {
+      if (e instanceof BudgetExhaustedError) {
+        return reply.status(429).send({ ok: false, error: "token budget exhausted — raise the cap to analyze refinements" });
+      }
       return reply.status(503).send({
         ok: false,
         error: `T2 analyze failed: ${e instanceof Error ? e.message : String(e)}`,

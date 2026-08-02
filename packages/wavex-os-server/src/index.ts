@@ -11,7 +11,6 @@
 import type { FastifyInstance } from "fastify";
 import { applyInferenceEnv } from "@wavex-os/inference-adapter";
 import { applyStateBridge } from "./state-bridge.js";
-import { detectAndConfigurePaperclip } from "./lib/paperclip-detect.js";
 import { registerPillarRoutes } from "./routes/pillars.js";
 import { registerPhaseRoutes } from "./routes/phases.js";
 import { registerProbeRoutes } from "./routes/probe.js";
@@ -39,6 +38,11 @@ import { registerTokenBudgetRoute } from "./routes/token-budget.js";
 import { registerRedundancyRoutes } from "./routes/redundancy.js";
 import { registerHelpChatRoute } from "./routes/help-chat.js";
 import { registerTiersRoutes } from "./routes/tiers.js";
+import { registerIgnitionRoutes } from "./routes/ignition.js";
+import { registerCanvasRoutes } from "./routes/canvas.js";
+import { registerRuntimeNativeRoutes } from "./routes/runtime-native.js";
+import { registerWorkRoutes } from "./routes/work.js";
+import { registerOrgRoutes } from "./routes/org.js";
 import { registerBillingRoutes } from "./routes/billing.js";
 import { registerAvatarRoutes } from "./routes/avatar.js";
 import { registerConnectorRoutes } from "./routes/connectors.js";
@@ -68,10 +72,6 @@ function bootstrap(): void {
   if (bootstrapped) return;
   applyInferenceEnv();
   applyStateBridge();
-  // Fire-and-forget Paperclip detection — don't block route registration on
-  // the network probe. If Paperclip comes up later, the operator can either
-  // restart wavex or set PAPERCLIP_HANDOFF_URL by hand.
-  void detectAndConfigurePaperclip();
   bootstrapped = true;
 }
 
@@ -104,6 +104,11 @@ export function registerWavexOsRoutes(app: FastifyInstance): void {
   registerRedundancyRoutes(app);
   registerHelpChatRoute(app);
   registerTiersRoutes(app);
+  registerIgnitionRoutes(app);
+  registerCanvasRoutes(app);
+  registerRuntimeNativeRoutes(app);
+  registerWorkRoutes(app);
+  registerOrgRoutes(app);
   void registerBillingRoutes(app);
   registerAvatarRoutes(app);
   registerConnectorRoutes(app);

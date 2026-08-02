@@ -27,7 +27,8 @@ export type PhaseKey =
   | "connector_manifest" | "swarm_manifest" | "workflow_manifest"
   | "finalize" | "recommend_agent" | "help_chat" | "board_chat"
   | "avatar_voice" | "avatar_intro" | "avatar_memory_distill"
-  | "avatar_mail_triage" | "avatar_calendar_triage" | "avatar_slack_digest";
+  | "avatar_mail_triage" | "avatar_calendar_triage" | "avatar_slack_digest"
+  | "canvas" | "task_exec" | "refinement";
 
 interface T2Event {
   ts_iso: string;
@@ -227,6 +228,9 @@ const DEFAULT_ETAS_MS: Partial<Record<PhaseKey, number>> = {
   finalize: 90_000,
   recommend_agent: 30_000,
   help_chat: 15_000,
+  canvas: 15_000,
+  task_exec: 120_000,
+  refinement: 60_000,
 };
 
 export interface PhaseEta {

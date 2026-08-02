@@ -23,13 +23,31 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, path: string, body?: unknown, opts?: { timeoutMs?: number }): Promise<T> {
   const init: RequestInit = { method };
   if (body !== undefined) {
     init.headers = { "Content-Type": "application/json" };
     init.body = JSON.stringify(body);
   }
-  const resp = await fetch(`${BASE}${path}`, init);
+  // Opt-in timeout: without one, a hung connection leaves the caller's busy
+  // state stuck forever (the canvas composer locks after one dead request).
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (opts?.timeoutMs) {
+    const ctrl = new AbortController();
+    timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
+    init.signal = ctrl.signal;
+  }
+  let resp: Response;
+  try {
+    resp = await fetch(`${BASE}${path}`, init);
+  } catch (e) {
+    if ((e as Error).name === "AbortError") {
+      throw new ApiError(`No response after ${Math.round((opts!.timeoutMs!) / 1000)}s — the server may still be working; try again in a moment.`);
+    }
+    throw e;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   const json = await resp.json().catch(() => ({})) as Record<string, unknown>;
   if (!resp.ok || json.ok === false) {
     const halt = (json as { halt?: OnboardingHaltPayload }).halt;
@@ -106,7 +124,14 @@ export interface InstanceKpisResponse {
   }>;
 }
 
-export interface CompaniesResponse { ok: boolean; companies: Array<{ id: string; name: string }>; }
+/** `state` is read off the filesystem by the server — how far this company
+ *  actually got. `live` means it has an org spine and belongs on the canvas,
+ *  NOT back at pillar 1. */
+export type CompanyState = "live" | "finalized" | "draft" | "empty";
+export interface CompaniesResponse {
+  ok: boolean;
+  companies: Array<{ id: string; name: string; state: CompanyState; updatedAt: string | null }>;
+}
 
 export const wavexOsOnboardingApi = {
   // Status
@@ -978,6 +1003,130 @@ export const wavexOsOnboardingApi = {
     }>("GET", `/api/instance/${encodeURIComponent(companyId)}/token-usage`),
 
   // Pricing tiers (System Optimizer subscription screen)
+  // ---- observability (previously only reachable via raw fetch) ----
+
+  obsMissionControl: (companyId: string) =>
+    call<{ ok: true; data: Record<string, unknown> }>(
+      "GET", `/api/observability/${encodeURIComponent(companyId)}/mission-control`),
+
+  obsBudget: (companyId: string) =>
+    call<{ ok: true; data: Record<string, unknown> }>(
+      "GET", `/api/observability/${encodeURIComponent(companyId)}/budget`),
+
+  obsBottlenecks: (companyId: string) =>
+    call<{ ok: true; data: Array<Record<string, unknown>> }>(
+      "GET", `/api/observability/${encodeURIComponent(companyId)}/bottlenecks`),
+
+  // ---- ignition (read side of activate) ----
+
+  getIgnitionStatus: (companyId: string) =>
+    call<import("../../canvas/contract").IgnitionStatusResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/ignition`),
+
+  igniteFleet: (companyId: string) =>
+    call<{ ok: true; ignition: Record<string, unknown> }>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/ignite`),
+
+  // ---- runtime reads (Part 2 via the server-side adapter) ----
+
+  getRuntimeDashboard: (companyId: string) =>
+    call<{ ok: true; dashboard: Record<string, any> }>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/runtime/dashboard`, undefined, { timeoutMs: 15_000 }),
+
+  getRuntimeActivity: (companyId: string) =>
+    call<{ ok: true; events: Array<Record<string, any>> }>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/runtime/activity`, undefined, { timeoutMs: 15_000 }),
+
+  getRuntimeApprovals: (companyId: string) =>
+    call<{ ok: true; approvals: Array<Record<string, any>> }>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/runtime/approvals`, undefined, { timeoutMs: 15_000 }),
+
+  getRuntimeLiveRuns: (companyId: string) =>
+    call<{ ok: true; runs: Array<Record<string, any>> }>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/runtime/live-runs`, undefined, { timeoutMs: 15_000 }),
+
+  // ---- cognitive canvas ----
+
+  getCanvas: (companyId: string) =>
+    call<import("../../canvas/contract").CanvasStateResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/canvas`, undefined, { timeoutMs: 20_000 }),
+
+  // 75s: the T2 composer runs up to 45s server-side, plus accounting margin.
+  sendCanvasMessage: (companyId: string, message: string, extra?: { restoreSignature?: string }) =>
+    call<import("../../canvas/contract").CanvasPostResponse>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/canvas`, { message, ...extra }, { timeoutMs: 75_000 }),
+
+  commitCanvasProposal: (companyId: string, proposalId: string) =>
+    call<{ ok: true; proposal: import("../../canvas/contract").CanvasProposal; turn?: import("../../canvas/contract").CanvasTurn; replayed?: boolean }>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/canvas/commit`, { proposalId }, { timeoutMs: 75_000 }),
+
+  pinWorkspace: (companyId: string, signature: string, title?: string) =>
+    call<{ ok: true; desk: import("../../canvas/contract").DeskState; layout: import("../../canvas/contract").LayoutSpec }>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/canvas/pin`, { signature, title }, { timeoutMs: 15_000 }),
+
+  unpinWorkspace: (companyId: string, signature: string) =>
+    call<{ ok: true; desk: import("../../canvas/contract").DeskState }>(
+      "DELETE", `/api/instance/${encodeURIComponent(companyId)}/canvas/pin`, { signature }, { timeoutMs: 15_000 }),
+
+  // ---- recursive org (docs/RECURSIVE_ORG_SPEC.md, R1) ----
+
+  getOrgFlywheel: (companyId: string) =>
+    call<import("../../canvas/contract").OrgFlywheelResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/flywheel`, undefined, { timeoutMs: 20_000 }),
+
+  getOrgNode: (companyId: string, nodeId: string) =>
+    call<import("../../canvas/contract").OrgNodeResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/nodes/${encodeURIComponent(nodeId)}`, undefined, { timeoutMs: 20_000 }),
+
+  askOrgNode: (companyId: string, nodeId: string, question: string) =>
+    call<{ ok: true; walkId: string }>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/org/nodes/${encodeURIComponent(nodeId)}/ask`, { question }, { timeoutMs: 75_000 }),
+
+  getOrgWalk: (companyId: string, walkId: string) =>
+    call<import("../../canvas/contract").OrgWalkResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/walks/${encodeURIComponent(walkId)}`, undefined, { timeoutMs: 20_000 }),
+
+  getOrgConstitution: (companyId: string) =>
+    call<import("../../canvas/contract").OrgConstitutionResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/constitution`, undefined, { timeoutMs: 20_000 }),
+
+  getOrgGravity: (companyId: string) =>
+    call<import("../../canvas/contract").OrgGravityResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/gravity`, undefined, { timeoutMs: 20_000 }),
+
+  getOrgInvestigations: (companyId: string, opts?: { nodeId?: string }) =>
+    call<import("../../canvas/contract").OrgInvestigationsResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/investigations/recent${opts?.nodeId ? `?nodeId=${encodeURIComponent(opts.nodeId)}` : ""}`,
+      undefined, { timeoutMs: 20_000 }),
+
+  getOrgMemory: (companyId: string) =>
+    call<import("../../canvas/contract").OrgMemoryListResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/org/memory`, undefined, { timeoutMs: 20_000 }),
+
+  keepToOrgMemory: (companyId: string, body: { nodeId: string; signature: string; question?: string }) =>
+    call<import("../../canvas/contract").OrgKeepResponse>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/org/memory`, body, { timeoutMs: 15_000 }),
+
+  // ---- the native work runtime (spec Rev 6) ----
+
+  getWork: (companyId: string) =>
+    call<import("../../canvas/contract").WorkStateResponse>(
+      "GET", `/api/instance/${encodeURIComponent(companyId)}/work`, undefined, { timeoutMs: 15_000 }),
+
+  seedWork: (companyId: string) =>
+    call<import("../../canvas/contract").WorkSeedResponse>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/work/seed`, {}, { timeoutMs: 20_000 }),
+
+  // A cycle executes briefs SERIALLY on the operator's own subscription —
+  // up to 3 tasks × 120s engine ceiling each, plus margin.
+  runWorkCycle: (companyId: string, opts?: { maxTasks?: number }) =>
+    call<import("../../canvas/contract").WorkCycleSummary>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/work/run-cycle`, opts ?? {}, { timeoutMs: 400_000 }),
+
+  reviewWorkDeliverable: (companyId: string, deliverableId: string, body: { verdict: "approved" | "changes_requested"; note?: string }) =>
+    call<import("../../canvas/contract").WorkReviewResponse>(
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/work/deliverables/${encodeURIComponent(deliverableId)}/review`, body, { timeoutMs: 15_000 }),
+
   listTiers: () =>
     call<{
       ok: true;

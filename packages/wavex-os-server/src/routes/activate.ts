@@ -19,6 +19,18 @@ import { bridgeAgents, bridgeKpis } from "../bridge/finalize-bridge.js";
 import { handoffToPaperclip, rerenderBundlesForCompany } from "../bridge/paperclip-handoff.js";
 import { ignite } from "../bridge/ignition.js";
 
+/** Paperclip is no longer the runtime (spec Rev 6). The response keeps a
+ *  stub handoff record because the Materialize screen reads it
+ *  unconditionally — enabled:false renders its existing quiet branch. */
+const HANDOFF_STUB = {
+  enabled: false as const,
+  paperclipUrl: null,
+  paperclipCompanyId: null,
+  created: [] as Array<{ slot: string; agentId: string }>,
+  skipped: [] as string[],
+  errors: [] as Array<{ slot: string; message: string }>,
+};
+
 function authReq(req: FastifyRequest) {
   return { method: req.method, headers: req.headers as Record<string, string> };
 }
@@ -308,7 +320,7 @@ export function registerActivateRoute(app: FastifyInstance): void {
         inserted: { companies: result.companies, agents: result.agents, kpis: result.kpis },
         warnings: result.warnings,
         sha256: newHash,
-        paperclipHandoff: handoff,
+        paperclipHandoff: HANDOFF_STUB,
         ignition,
         ignition_orphaned: ignitionOrphaned,
       };

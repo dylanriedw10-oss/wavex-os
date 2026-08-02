@@ -130,13 +130,42 @@ export function registerInstanceRoutes(app: FastifyInstance): void {
     }
     // Enumerate companies from the plugin's session layout:
     //   ~/.wavex-os/instances/default/companies/<companyId>/onboarding/
+    //
+    // Each entry carries its REAL state, read off the filesystem — the
+    // entry screen has to tell a live company from an abandoned test
+    // shell, and a directory name alone can't. The ladder is ordered by
+    // how far a company got; the first file that exists wins:
+    //
+    //   org.json                 → live      (activated: it has a spine)
+    //   company.manifest.json    → finalized (signed, not yet activated)
+    //   pillar_responses.json    → draft     (answers in flight)
+    //   (nothing)                → empty     (a directory and no more)
     try {
       const fs = await import("node:fs/promises");
       const companiesRoot = join(getInstanceDir(""), "default", "companies");
       const entries = await fs.readdir(companiesRoot, { withFileTypes: true }).catch(() => []);
-      const companies = entries
+      const companies = await Promise.all(entries
         .filter((e) => e.isDirectory())
-        .map((e) => ({ id: e.name, name: e.name }));
+        .map(async (e) => {
+          const dir = getOnboardingDir(e.name);
+          const stat = async (f: string) => await fs.stat(join(dir, f)).then((s) => s, () => null);
+          const [org, manifest, pillars] = await Promise.all([
+            stat("org.json"), stat("company.manifest.json"), stat("pillar_responses.json"),
+          ]);
+          const state = org ? "live" : manifest ? "finalized" : pillars ? "draft" : "empty";
+          // Last touch across whatever exists — sorts the list by recency
+          // so the company you were just in is at the top.
+          const touched = [org, manifest, pillars]
+            .filter((s): s is NonNullable<typeof s> => s !== null)
+            .map((s) => s.mtimeMs);
+          return {
+            id: e.name,
+            name: e.name,
+            state,
+            updatedAt: touched.length ? new Date(Math.max(...touched)).toISOString() : null,
+          };
+        }));
+      companies.sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""));
       return { ok: true, companies };
     } catch (e) {
       return reply.status(500).send({ error: "failed to enumerate companies" });

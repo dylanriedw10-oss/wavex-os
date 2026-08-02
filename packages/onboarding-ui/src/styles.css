@@ -1,4 +1,6 @@
-/* Minimal styling — design system polish in Phase E. */
+/* Design tokens. The block below the legacy names is additive — every
+ * pre-existing custom property keeps its exact value so onboarding,
+ * Mission Control, and pricing are unaffected. */
 
 :root {
   --bg: #0a0a0b;
@@ -13,6 +15,294 @@
   --danger: #e06070;
   --radius: 8px;
   --max-width: 920px;
+
+  /* ---- identity: command surface, links, focus, primary action ---- */
+  --brand: #4ec9b0;      /* alias of --accent */
+  --brand-dim: #3a9484;  /* alias of --accent-dim */
+  --on-brand: #08221d;   /* the previously hardcoded on-accent foreground */
+
+  /* ---- semantic status: never used for identity ---- */
+  --success: #3fb98f;    /* healthy / ready / achieved — distinct from brand */
+
+  /* ---- type scale ---- */
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 18px;
+  --text-xl: 24px;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  /* ---- 8px spacing scale ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ---- radii + motion ---- */
+  --radius-sm: 4px;
+  --radius-lg: 14px;
+  --dur-fast: 80ms;      /* matches the existing button transition */
+  --dur-base: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- canvas palette (canvas scope): architectural calm. Warm off-white
+   * ground, ink carries hierarchy, accents are desaturated and scarce —
+   * color is meaning, not branding, and nothing screams. These are STATUS
+   * tokens, never series colors: every use ships a text label, and
+   * attend/crit are lightness-separated for CVD. Validated against #FAFAF8
+   * (contrast pass; low chroma is the point, not an accident). ---- */
+  --void: #F4F3EF;       /* canvas GROUND — a step deeper than paper, so paper detaches */
+  --panel: #FFFFFF;      /* paper — raised surfaces */
+  --panel-2: #ECEBE5;    /* nested / inset surfaces */
+  --edge: rgba(0, 0, 0, 0.08);  /* hairlines */
+  --ink: #1B1B1B;        /* primary text — the hero */
+  --ink-dim: #63636A;    /* secondary text (≥4.9:1 on every surface above) */
+  --mind: #605F96;       /* intelligence: generated, reasoning, temporary */
+  --live: #2A737A;       /* alive: streaming, in-flight, "this is now" */
+  --good: #257A4A;       /* confirmed + trajectory: approved, healthy, progress */
+  --attend: #96781F;     /* needs review: uncertainty, degraded, retryable */
+  --crit: #8E3A38;       /* rare: failed mutations, blocked states */
+
+  /* ---- elevation (canvas scope): the constitution's fixed ladder.
+   * Canvas → Workspace(1) → Popover(2) → Tooltip(3); Modal never exists.
+   * Compound shadows: a contact line + a warm ambient. These tokens are
+   * the ONLY legal shadows on the canvas — surfaces cast, controls don't,
+   * and no inline box-shadow values (frontend-constitution.md, Depth). */
+  --elev-1: 0 1px 2px rgba(28, 25, 18, 0.05), 0 12px 32px -14px rgba(28, 25, 18, 0.18);
+  --elev-1-up: 0 2px 4px rgba(28, 25, 18, 0.06), 0 18px 44px -16px rgba(28, 25, 18, 0.22);
+  --elev-2: 0 2px 6px rgba(28, 25, 18, 0.07), 0 24px 56px -18px rgba(28, 25, 18, 0.28);
+  --elev-3: 0 8px 24px -12px rgba(0, 0, 0, 0.35);
+
+  /* ---- display step for mastheads (one confident title per screen) ---- */
+  --text-2xl: 32px;
+}
+
+/* The canvas surface flips to the light architectural language by remapping
+ * the token names its components already consume. The wizard and Mission
+ * Control never see these overrides. */
+.canvas-root {
+  /* Re-resolve the inherited text color HERE: body sets `color: var(--text)`
+   * against the global theme, and descendants inherit that resolved value —
+   * without this line, anything that doesn't set its own color renders in
+   * the outer theme's ink. */
+  color: var(--ink);
+  --bg: var(--void);
+  --surface: var(--panel);
+  --surface-2: var(--panel-2);
+  --border: var(--edge);
+  --text: var(--ink);
+  --text-dim: var(--ink-dim);
+  --warning: var(--attend);
+  --danger: var(--crit);
+  --success: var(--good);
+  /* Links and any stray accent consumers go ink too — teal is not identity
+   * here, it is the liveness signal and nothing else. */
+  --accent: var(--ink);
+  --accent-dim: #444444;
+  --brand: var(--ink);
+  --brand-dim: #444444;
+  --on-brand: #FDFDFB;
+}
+/* Interaction is neutral: one quiet ink fill for the primary action,
+ * hairlines for everything else. Color never means "clickable" here —
+ * it means state. */
+.canvas-root button {
+  background: var(--ink);
+  color: #FDFDFB;
+  border-radius: 10px;
+  box-shadow: none;                    /* controls don't cast */
+  transition: background 120ms var(--ease), transform 120ms var(--ease);
+}
+.canvas-root button:hover { background: #333333; }
+.canvas-root button:active { transform: translateY(0.5px); }
+.canvas-root button.secondary { background: transparent; color: var(--ink); border: 1px solid rgba(0, 0, 0, 0.12); }
+.canvas-root button.secondary:hover { background: rgba(0, 0, 0, 0.035); }
+/* Focus wears the mind hue — visible on ground and paper alike, and it's
+ * the one place the intelligence color touches chrome. */
+.canvas-root :focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--mind) 60%, transparent);
+  outline-offset: 2px;
+}
+.canvas-root ::selection { background: color-mix(in srgb, var(--mind) 18%, transparent); }
+/* Scrollbars: thin, quiet, ground-tinted — default chrome is the
+ * loudest "localhost" residue on an otherwise finished surface. */
+.canvas-root * {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+}
+.canvas-root ::-webkit-scrollbar { width: 10px; height: 10px; }
+.canvas-root ::-webkit-scrollbar-track { background: transparent; }
+.canvas-root ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.canvas-root ::-webkit-scrollbar-thumb:hover { background-color: rgba(0, 0, 0, 0.28); }
+
+/* ---- materials (canvas scope) ----
+ * Architectural glass, not futuristic glass: panels are 95–98% opaque,
+ * blur is barely there, borders are almost invisible, shadows are soft
+ * diffusion. Glass exists only to communicate hierarchy — never
+ * decoration. The ground carries one gentle wash of daylight and the
+ * faintest trace of mind, nothing else. */
+.canvas-root {
+  background:
+    radial-gradient(72% 52% at 50% -12%, rgba(255, 255, 255, 0.85), transparent 70%),
+    radial-gradient(44% 34% at 96% -2%, color-mix(in srgb, var(--mind) 3%, transparent), transparent 70%),
+    var(--void);
+}
+.canvas-root .cv-glass {
+  background: rgba(255, 255, 255, 0.86);
+  -webkit-backdrop-filter: blur(10px) saturate(1.15);
+  backdrop-filter: blur(10px) saturate(1.15);
+  border: 1px solid rgba(0, 0, 0, 0.055);
+  box-shadow: var(--elev-1);
+}
+/* Material weights: permanence made material (docs/RECURSIVE_ORG_SPEC.md §11).
+ * Fluid = receding/ephemeral (board chips, parents stepped back);
+ * standard = the default above; solid = load-bearing objects — the
+ * Constitution reads near-opaque with a whisper of mind on the hairline. */
+.canvas-root .cv-glass--fluid {
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  border-color: rgba(0, 0, 0, 0.05);
+  box-shadow: none;
+}
+.canvas-root .cv-glass--solid {
+  background: rgba(255, 255, 255, 0.97);
+  -webkit-backdrop-filter: blur(12px) saturate(1.15);
+  backdrop-filter: blur(12px) saturate(1.15);
+  border-color: color-mix(in srgb, var(--mind) 14%, rgba(0, 0, 0, 0.08));
+  box-shadow: var(--elev-2);
+}
+
+/* ---- the elevation ladder as classes (canvas scope) ----
+ * cv-paper: an opaque workspace surface — cards, panels, queues. The
+ * default material for every node panel (glass stays reserved for
+ * load-bearing chrome and receding parents). Controls (chips, pills,
+ * buttons) sit flat on their surface: hairline, no shadow — shadows
+ * belong to surfaces, not controls. */
+.canvas-root .cv-paper {
+  background: var(--panel);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1);
+}
+/* cv-pop: the Popover layer — floating snapshots, hover cards. */
+.canvas-root .cv-pop {
+  background: var(--panel);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-2);
+}
+/* cv-chrome: sticky translucent chrome (the rail) that content actually
+ * scrolls beneath — frost is only real when something passes under it. */
+/* The Runtime tray arrives from the edge it lives on — one glide. */
+@keyframes cv-tray-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* Hover lifts 2px — the constitution's tactile confirmation. Interactive
+ * objects only; surfaces at rest never move. */
+.canvas-root .cv-lift {
+  transition: transform 130ms var(--ease), box-shadow 130ms var(--ease);
+}
+.canvas-root .cv-lift:hover { transform: translateY(-2px); }
+@media (prefers-reduced-motion: reduce) {
+  .canvas-root .cv-lift:hover { transform: none; }
+}
+.canvas-root .cv-chrome {
+  position: sticky;
+  top: calc(-1 * var(--space-4));
+  z-index: 6;
+  background: color-mix(in srgb, var(--void) 55%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+}
+.canvas-root input:not([type="radio"]):not([type="checkbox"]) {
+  background: var(--panel);
+  border-color: rgba(0, 0, 0, 0.10);
+  color: var(--text);
+}
+/* Tooltip: glass, value-first, pointer-transparent. Enhances only — every
+ * value it shows is also on a direct label or in the cell's caption. */
+.canvas-root .cv-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  /* Tooltips stay dark on the light surface (the macOS idiom) — remap the
+   * ink tokens inside so nested text stays readable. */
+  --text: #F5F5F3;
+  --text-dim: #B9B9BD;
+  color: var(--text);
+  background: rgba(27, 27, 27, 0.92);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px -12px rgba(0, 0, 0, 0.35);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.canvas-root .cv-tip strong { font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+
+/* Skeleton loading: a quiet shimmer while a binding fetches. The global
+ * reduced-motion rule freezes the animation to a static wash. */
+.canvas-root .cv-skeleton {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.04) 25%, rgba(0, 0, 0, 0.08) 50%, rgba(0, 0, 0, 0.04) 75%);
+  background-size: 200% 100%;
+  animation: cv-shimmer 1.6s ease-in-out infinite;
+}
+@keyframes cv-shimmer { from { background-position: 180% 0; } to { background-position: -20% 0; } }
+
+/* Information is matter: when a value changes under a stable layout the
+ * cell settles — a brief brightening, then rest. (Layout changes use
+ * cv-morph; this is the data-changed sibling.) */
+@keyframes cv-settle { 0% { filter: brightness(1); } 30% { filter: brightness(0.965); } 100% { filter: brightness(1); } }
+.canvas-root .cv-settle { animation: cv-settle 600ms var(--ease); }
+
+/* Honest fallbacks: no blur support, or the user asked for less
+ * transparency → solid panels, same layout, same meaning. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .canvas-root .cv-glass { background: var(--panel); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .canvas-root { background: var(--void); }
+  .canvas-root .cv-glass {
+    background: var(--panel);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Focus. Form fields have a ring below; buttons, links, and custom
+ * clickable elements previously had none at all. */
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The app is styled predominantly inline, so stylesheet breakpoints can
+ * only reach class-styled surfaces. New surfaces must be responsive by
+ * construction (minmax/flex-wrap, no fixed pixel container widths). */
+@media (max-width: 900px) {
+  .card { padding: var(--space-4); }
+  .nav-buttons { flex-direction: column; gap: var(--space-2); }
 }
 
 * { box-sizing: border-box; }

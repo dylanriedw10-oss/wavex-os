@@ -130,6 +130,12 @@ test.describe("flow variants — 10x", () => {
     await expect(page.getByText(/Activated.*agents written to db/i)).toBeVisible({ timeout: 15_000 });
     await expect(page).toHaveURL(new RegExp(`companyId=${id}`), { timeout: 10_000 });
 
+    // Pricing sits between Activate and Mission Control — choose plan, skip.
+    await page.getByRole("button", { name: /Choose plan/i }).click();
+    await expect(page.getByRole("heading", { name: /System Optimizer subscription/i }))
+      .toBeVisible({ timeout: 10_000 });
+    await page.getByRole("button", { name: /Skip.*continue without subscription/i }).click();
+
     // Mission Control loaded
     await expect(page.getByRole("heading", { name: /KPI scoreboard/i })).toBeVisible({ timeout: 15_000 });
   });
@@ -143,7 +149,9 @@ test.describe("flow variants — 10x", () => {
     await api.dispose();
 
     await page.goto("/onboarding");
-    await expect(page.getByRole("heading", { name: /Resume.*existing draft/i })).toBeVisible({ timeout: 10_000 });
+    // A company with answers in flight is a DRAFT — it lands in "In
+    // progress", not among the already-onboarded (those go to the canvas).
+    await expect(page.getByRole("heading", { name: /^In progress$/i })).toBeVisible({ timeout: 10_000 });
     await expect(page.locator("code", { hasText: id })).toBeVisible();
   });
 
