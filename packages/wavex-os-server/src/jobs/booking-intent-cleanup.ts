@@ -57,9 +57,12 @@ async function cancelStaleIntents(cfg: SupabaseConfig): Promise<number> {
 }
 
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+let startupRun: Promise<void> = Promise.resolve();
 
-export function startBookingIntentCleanupScheduler(): void {
-  if (cleanupTimer) return;
+/** Starts the 5-minute scheduler and returns its startup run so the caller
+ *  can drain it on shutdown. */
+export function startBookingIntentCleanupScheduler(): Promise<void> {
+  if (cleanupTimer) return startupRun;
 
   const INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
 
@@ -79,6 +82,15 @@ export function startBookingIntentCleanupScheduler(): void {
   };
 
   // Run once immediately, then on the interval.
-  void run();
+  startupRun = run();
   cleanupTimer = setInterval(() => void run(), INTERVAL_MS);
+  cleanupTimer.unref?.();
+  return startupRun;
+}
+
+export function stopBookingIntentCleanupScheduler(): void {
+  if (cleanupTimer) {
+    clearInterval(cleanupTimer);
+    cleanupTimer = null;
+  }
 }
