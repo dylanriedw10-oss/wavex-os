@@ -59,15 +59,16 @@ const start = (body: Record<string, unknown> = {}) =>
 
 const get = () => app.inject({ method: "GET", url: `${BASE}?companyId=${CO}` });
 
-/** The run settles on a fire-and-forget worker; poll the GET like the client. */
-async function settled(tries = 60) {
-  for (let i = 0; i < tries; i++) {
-    const run = get().then((r) => r.json().run);
-    const r = await run;
-    if (r && r.status !== "researching") return r;
-    await new Promise((res) => setTimeout(res, 50));
-  }
-  throw new Error("run never settled");
+/** The run settles on a fire-and-forget worker — so await THAT WORKER, not a
+ *  status field. `status !== "researching"` was never a settle signal: it is
+ *  equally true of a run the GET's stale-research recovery rebuilt WITHOUT
+ *  research, which is exactly what a slow worker plus a stale read produced.
+ *  The route now hands out the worker's promise; when it resolves the run
+ *  file is written, so one read answers. */
+async function settled() {
+  const { researchInFlight } = await import("../src/routes/plan-assembly.js");
+  await researchInFlight(CO);
+  return (await get()).json().run;
 }
 
 describe("the ordering IS the contract", () => {

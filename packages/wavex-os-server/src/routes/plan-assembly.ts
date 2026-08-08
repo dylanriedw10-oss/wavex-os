@@ -486,8 +486,23 @@ async function runRefinementTail(companyId: string): Promise<void> {
 /* Research → settle                                                    */
 /* ------------------------------------------------------------------ */
 
-/** One research call in flight per company, per process. Mirrors REFINING. */
-const RESEARCHING = new Set<string>();
+/** One research call in flight per company, per process — and the HANDLE to
+ *  await it. A `Set` could only answer "is someone working?"; it could not
+ *  answer "tell me when they are done", which left every consumer polling
+ *  `status !== "researching"` — a condition that reads the same before the
+ *  worker starts and after it finishes, and cannot tell a run settled WITH
+ *  research from one the stale recovery below settled WITHOUT it. */
+const RESEARCHING = new Map<string, Promise<void>>();
+
+/** The completion signal a fire-and-forget worker otherwise cannot give.
+ *  Resolves once the worker has settled the run file; `undefined` when
+ *  nothing is in flight for this company (already settled, or never started).
+ *  This is also what makes the staleness check below honest: it is sampled
+ *  BEFORE the run is read, so the two observations cannot be paired out of
+ *  order. */
+export function researchInFlight(companyId: string): Promise<void> | undefined {
+  return RESEARCHING.get(companyId);
+}
 
 interface DeterministicCtx {
   responses: unknown;
@@ -769,8 +784,11 @@ export function registerPlanAssemblyRoutes(app: FastifyInstance): void {
       patches: [], warnings: baseWarnings, placement,
     };
     await writeRun(run);
-    RESEARCHING.add(companyId);
-    void researchThenSettle(companyId, ctx, skipInference);
+    // The worker's own promise IS the registry entry: `researchThenSettle`
+    // runs to its first await and hands back a handle, which is stored before
+    // anything can yield, so the run file never says "researching" while the
+    // registry says nobody is on it.
+    RESEARCHING.set(companyId, researchThenSettle(companyId, ctx, skipInference));
     return { ok: true, run };
   });
 
@@ -779,6 +797,16 @@ export function registerPlanAssemblyRoutes(app: FastifyInstance): void {
     const { companyId } = (req.query ?? {}) as { companyId?: string };
     if (!companyId) return reply.status(400).send({ error: "companyId required" });
     assertCompanyAccess(authReq(req), companyId);
+    // Sampled BEFORE the read, and that order is the whole point. `readRun`
+    // is a yield: the bytes are taken at one instant and the continuation
+    // runs at a later one, so asking the registry after the read pairs an
+    // OLD view of the file with a NEW view of who is working. Under load
+    // that window is wide enough for a worker to finish inside it, and the
+    // recovery below would then rebuild the plan from the manifests with
+    // `research = null` — overwriting, on disk, the findings it had just
+    // produced. Sampling first makes "in flight" strictly no younger than
+    // the snapshot, so a worker seen as gone really is gone.
+    const researchWorker = researchInFlight(companyId);
     const run = await readRun(companyId);
     if (!run) return { ok: true, exists: false, run: null };
     // A refining run with no in-process worker means the server restarted
@@ -793,7 +821,7 @@ export function registerPlanAssemblyRoutes(app: FastifyInstance): void {
     // disk (all written at /start, all cheap reads) so the GET answers with a
     // complete plan. `stale_research` therefore never persists as a terminal
     // state — it exists only as the warning explaining the missing findings.
-    if (run.status === "researching" && !RESEARCHING.has(companyId)) {
+    if (run.status === "researching" && !researchWorker) {
       const recovered = await recoverStaleResearch(companyId);
       if (recovered) return { ok: true, exists: true, run: recovered };
     }
