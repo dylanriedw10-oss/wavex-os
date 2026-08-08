@@ -22,7 +22,7 @@ import type { Pillar1Response } from "@wavex-os/plugin-onboarding";
 import { route as tierRoute } from "@wavex-os/plugin-tier-router";
 import { fetchPage } from "../lib/url-prefetch.js";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
-import { getInferenceMode } from "@wavex-os/inference-adapter";
+import { getInferenceMode, getClaudeBin } from "@wavex-os/inference-adapter";
 import { withTokenAccounting, type PhaseKey } from "../lib/token-accounting.js";
 import { BudgetExhaustedError } from "../lib/token-budget.js";
 
@@ -41,7 +41,17 @@ const PILLAR1_CLAUDE_TIMEOUT_MS = 25_000;
  *  heuristic in that case. */
 function runClaudeForPillar1Enrichment(prompt: string): Promise<Record<string, unknown> | null> {
   return new Promise((resolve) => {
-    const claudeBin = IS_WIN_P1 ? "claude.cmd" : "claude";
+    // Ask the repo's resolver rather than guessing a name off the platform.
+    // The hardcoded "claude" was wrong in two of the three inference modes:
+    // in `oauth` (the dev default) T2 is supposed to go through
+    // scripts/wavex-claude-spawn.sh, which resolves the operator's Max OAuth
+    // credential; in `hosted` there is no local CLI at all and the contract is
+    // served by scripts/wrappers/claude-hosted-shim.mjs. Spawning a bare
+    // `claude` meant this BYOC fallback silently resolved to whatever was on
+    // PATH — the wrong credential in oauth mode, and a guaranteed ENOENT for
+    // hosted customers, who then always took the vendor-heuristic path.
+    // `shell: IS_WIN_P1` still covers Windows resolving `claude` → `claude.cmd`.
+    const claudeBin = getClaudeBin();
     const child = spawn(
       claudeBin,
       [
@@ -529,6 +539,12 @@ export function registerPillarRoutes(app: FastifyInstance): void {
       const outcome = await handlePillar2({
         claude_plan: body.claude_plan,
         claude_plan_other_note: body.claude_plan_other_note,
+        // Same resolver as every other spawn site. Previously omitted, which
+        // left the vendored probe to fall back to the raw WAVEX_OS_CLAUDE_BIN
+        // env var — correct only because applyInferenceEnv() happens to have
+        // populated it at boot. Make the dependency explicit instead of
+        // relying on a global that a different boot order could leave unset.
+        claudeBin: getClaudeBin(),
       });
       await updatePillar(body.companyId, "pillar_2", outcome.response);
       return outcome;
