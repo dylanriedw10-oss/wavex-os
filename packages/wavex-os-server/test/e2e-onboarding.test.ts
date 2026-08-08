@@ -159,12 +159,16 @@ async function inject<T = unknown>(method: "GET" | "POST", url: string, body?: u
 }
 
 async function walkPillars(fx: Fixture): Promise<void> {
-  // Pillar 1 — bypass T2 by providing manual_context (≥40 chars triggers manual_capture path)
+  // Pillar 1 — deterministic. skipInference keeps the wavex-layer enrichment
+  // (combined tier-router call + BYOC fallback) offline, so the vendored
+  // handlePillar1 answers from manual_context (≥40 chars → manual_capture).
+  // Without it this walk spawns real T2 and blows the 30 s budget below.
   const p1 = await inject<{ ok: boolean; response: { industry_hint: string } }>("POST", "/wavex-os/onboarding/pillar/1", {
     companyId: fx.companyId,
     org_name: fx.pillar1.org_name,
     raw_input: fx.pillar1.raw_input,
     manual_context: fx.pillar1.manual_context,
+    skipInference: true,
   });
   expect(p1.status, `pillar 1 for ${fx.companyId}`).toBe(200);
   expect(p1.body.ok).toBe(true);

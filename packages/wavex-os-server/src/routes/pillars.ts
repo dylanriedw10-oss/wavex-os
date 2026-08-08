@@ -312,6 +312,20 @@ const pillar1Schema = z.object({
   org_name: z.string().min(1).max(120),
   raw_input: z.string().min(1).max(2048),
   manual_context: z.string().min(40).max(2048).optional(),
+  // Deterministic path. Every OTHER inference-calling route in this pipeline
+  // already takes this flag (connector/swarm/workflow manifests, finalize,
+  // avatar) — pillar 1 was the only one that could not be told to stay
+  // offline, which is why the e2e harness could not walk the pillars without
+  // spawning live T2 and blowing its own 30 s budget.
+  //
+  // Scope, stated honestly: this suppresses the WAVEX-LAYER enrichment (the
+  // combined tier-router call and the BYOC fallback). The vendored
+  // handlePillar1 then answers from `manual_context` — upstream documents
+  // that input as "skips the T2 enrichment call entirely" — or from the
+  // pre-product branch. A BARE URL with no manual_context still reaches the
+  // vendored deep-dive T2, because the only alternative would be to invent a
+  // company_context we have no evidence for.
+  skipInference: z.boolean().optional(),
 });
 
 /** Operator-edit overrides for pillar_1 fields after T2 enrichment.
@@ -422,8 +436,8 @@ export function registerPillarRoutes(app: FastifyInstance): void {
 
   pillarRoute(1, pillar1Schema, async (body) => {
     return withTokenAccounting(body.companyId, "pillar_1", async () => {
-      // Pre-product fast path — no T2 needed.
-      if (looksLikeNoProduct(body.raw_input.trim())) {
+      // Deterministic / pre-product fast path — no T2 needed.
+      if (body.skipInference || looksLikeNoProduct(body.raw_input.trim())) {
         const result = await handlePillar1({
           org_name: body.org_name,
           raw_input: body.raw_input,
