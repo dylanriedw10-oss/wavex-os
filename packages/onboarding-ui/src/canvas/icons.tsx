@@ -5,6 +5,21 @@
 import type { ReactNode } from "react";
 
 export const ICON_PATHS: Record<string, ReactNode> = {
+  /* Added for onboarding (the standardization pass): selection, connection,
+   * and identity — the three ideas its emoji were carrying. */
+  check: <path d="M4.5 12.5l5 5 10-10" />,
+  plug: (
+    <>
+      <path d="M9 3v5M15 3v5" />
+      <path d="M6.5 8h11v3a5.5 5.5 0 0 1-11 0V8Z" />
+      <path d="M12 16.5V21" />
+    </>
+  ),
+  spark: (
+    <>
+      <path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9L12 3.5Z" />
+    </>
+  ),
   people: (
     <>
       <circle cx="9" cy="8.5" r="3" />

@@ -11,7 +11,7 @@
  *  parent never renders as a dead breadcrumb — it steps back into fluid
  *  material, one click from returning. */
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { wavexOsOnboardingApi, ApiError } from "../wavex-os/lib/api";
@@ -19,7 +19,13 @@ import { Cell } from "./cells";
 import { Ic } from "./icons";
 import { WorkPanel } from "./WorkPanel";
 import { DeskBody, MiniOrgChart } from "./Desk";
+import { ClampedList } from "./ClampedList";
+import { WHEEL_BASE, useInstrumentHeight, useMeasuredHeight, wheelScale } from "./layout";
 import type { CellSpec, OrgNode, OrgWalkStep } from "./contract";
+
+/** The wheel's own caption line, which lives INSIDE the measured face region
+ *  (spec Rev 10). Everything else about L0's budget is measured. */
+const WHEEL_CAPTION_PX = 56;
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -246,7 +252,7 @@ function petalPath(c: number, r0: number, r1: number, a0: number, a1: number, cr
 /** Slot names are lowercase identifiers; the wheel prints them as names. */
 export const displayName = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
 
-export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
+export function OrgFlywheel({ departments, onEnter, registerPetal, caption, facePx, total: totalProp, center, emptyNote, labels = true }: {
   departments: OrgNode[];
   /** fromRect = the clicked petal's viewport rect, for the unfold. */
   onEnter: (nodeId: string, fromRect?: DOMRect) => void;
@@ -254,19 +260,68 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
   /** The watch face's ONE caption line (L0 budget) — shown when nothing is
    *  hovered. The compass earns the line; nothing else does. */
   caption?: ReactNode;
+  /** Px available to the FACE itself (spec Rev 10) — the caller subtracts
+   *  the rail, caption, and hub row, because only it knows what else it is
+   *  rendering into the instrument zone. */
+  facePx?: number;
+  /** THE GROWTH SEAM (Build Your Organization): how many slices the ring is
+   *  divided into. Defaults to departments.length — today's behavior, a
+   *  fully partitioned ring. A build surface that knows the plan will have
+   *  5 departments passes total=5 while revealing them one at a time: two
+   *  petals then occupy slices 0-1 of a five-slice circle, and the ring
+   *  visibly GROWS instead of repartitioning on every arrival. */
+  total?: number;
+  /** The still center. Defaults to the Constitution — the live canvas's
+   *  center is not configurable copy, it is the door to the law. The build
+   *  surface passes the company name while the org is still a proposal. */
+  center?: { eyebrow: string; title: string; onClick?: () => void; ariaLabel?: string };
+  /** Replaces the zero-departments paragraph. */
+  emptyNote?: ReactNode;
+  /** Shed the petal labels and scale below the legibility floor.
+   *
+   *  `WHEEL_MIN_SCALE` (0.72) exists ONLY because 14px petal labels stop
+   *  being readable below it — it is a constraint on the labels, not on the
+   *  shape. The fit law's own remedy for hitting a floor is to shed a
+   *  stratum rather than shrink past it, so a caller that has already
+   *  rendered the department names in text (Review names every one, with
+   *  its agent count) may drop the label layer and let the wheel become
+   *  what it actually is there: a glance at the org's shape.
+   *
+   *  Hover still resolves — the petals keep their pop-up, which is where
+   *  the name goes when the label is gone. */
+  labels?: boolean;
 }) {
   const [hover, setHover] = useState<OrgNode | null>(null);
+  // Gradient ids are instance-namespaced: two wheels mounted at once (the
+  // build surface growing while /canvas is open in another tab-pane) must
+  // not fight over #petal-g-0.
+  const uid = useId();
   // Soft tinted petals around a still white center. Identity is tint +
   // icon; the name prints in ink; the percentage appears ONLY when the
   // completeness number is real (R1 departments honestly have none).
-  const size = 520, c = size / 2, r0 = 104, r1 = 242, cr = 34;
+  const size = WHEEL_BASE, c = size / 2, r0 = 104, r1 = 242, cr = 34;
   const n = departments.length;
-  const gapPx = n > 1 ? 18 : 6;      // constant-width silence between blades
+  // The angular denominator. Guarded so a caller passing total < rendered
+  // petals can't fold the ring into overlapping slices.
+  const total = Math.max(totalProp ?? n, n, 1);
+  const gapPx = total > 1 ? 18 : 6;  // constant-width silence between blades
   const rc = (r0 + r1) / 2;          // content radius
+  // The fit law (spec Rev 10): the face scales to the window. Every
+  // coordinate below — and the absolutely positioned HTML petal labels —
+  // derives from `size`, so we keep the internal system at 520 and scale the
+  // rendered box instead. SVG and HTML then scale together, with no geometry
+  // rewrite and no drift between the two layers.
+  // With the label stratum shed, the 0.72 floor no longer applies — it was
+  // guarding 14px text that is no longer rendered. The face still needs to
+  // read as a wheel, so it floors at 0.34 (≈176px): the point where the
+  // petal gaps and the center hub stop being distinguishable.
+  const k = labels ? wheelScale(facePx ?? 0) : Math.max(0.34, Math.min(1, (facePx ?? 0) / WHEEL_BASE));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-3)" }}>
-      <div style={{ position: "relative", width: size, height: size }}>
+      {/* Outer box owns the SCALED layout size; inner keeps the 520 system. */}
+      <div style={{ width: size * k, height: size * k, flexShrink: 0 }}>
+      <div style={{ position: "relative", width: size, height: size, transform: k === 1 ? undefined : `scale(${k})`, transformOrigin: "top left" }}>
         {/* The face is an OBJECT on the canvas, not a diagram: it casts one
             soft ground shadow, sits in a recessed channel behind a hairline
             bezel, and each petal is top-lit — manufactured, not filled. */}
@@ -274,7 +329,7 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
           style={{ filter: "drop-shadow(0 2px 4px rgba(28,25,18,0.05)) drop-shadow(0 20px 32px rgba(28,25,18,0.10))", overflow: "visible" }}>
           <defs>
             {departments.map((d, i) => (
-              <radialGradient key={d.id} id={`petal-g-${i}`} gradientUnits="userSpaceOnUse"
+              <radialGradient key={d.id} id={`petal-g-${uid}-${i}`} gradientUnits="userSpaceOnUse"
                 cx={c} cy={c * 0.3} r={size * 0.85}>
                 <stop offset="0%" stopColor={`color-mix(in srgb, ${deptHue(i)} 7%, #FFFFFF)`} />
                 <stop offset="100%" stopColor={`color-mix(in srgb, ${deptHue(i)} 16%, #FFFFFF)`} />
@@ -292,20 +347,27 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
             </>
           )}
           {departments.map((d, i) => {
-            const a0 = -Math.PI / 2 + (i / n) * 2 * Math.PI;
-            const a1 = -Math.PI / 2 + ((i + 1) / n) * 2 * Math.PI;
+            const a0 = -Math.PI / 2 + (i / total) * 2 * Math.PI;
+            const a1 = -Math.PI / 2 + ((i + 1) / total) * 2 * Math.PI;
             const hovered = hover?.id === d.id;
             const hue = deptHue(i);
             return (
               <path key={d.id}
                 ref={(el) => registerPetal?.(d.id, el)}
                 d={petalPath(c, r0, r1, a0, a1, cr, gapPx)}
-                fill={`url(#petal-g-${i})`}
+                fill={`url(#petal-g-${uid}-${i})`}
                 stroke={`color-mix(in srgb, ${hue} ${hovered ? 55 : 34}%, transparent)`}
                 strokeWidth={1}
                 style={{
                   cursor: "pointer",
-                  transition: "stroke 130ms var(--ease), filter 130ms var(--ease)",
+                  /* `d` interpolates when the denominator changes (petalPath
+                     always emits the same 10-command structure) — growth
+                     GLIDES on Chromium/Safari and snaps on Firefox, an
+                     accepted progressive enhancement. Reduced motion snaps
+                     everywhere. */
+                  transition: REDUCE
+                    ? "stroke 130ms var(--ease), filter 130ms var(--ease)"
+                    : "stroke 130ms var(--ease), filter 130ms var(--ease), d 480ms var(--ease)",
                   /* hover LIFTS — brightness + its own shadow — instead of recoloring */
                   filter: hovered ? "brightness(1.02) drop-shadow(0 6px 14px rgba(28,25,18,0.16))" : undefined,
                 }}
@@ -318,9 +380,10 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
           })}
         </svg>
         {/* Petal content rides above as HTML — icon in the identity hue,
-            name in ink, the number only when it exists. */}
-        {departments.map((d, i) => {
-          const mid = -Math.PI / 2 + ((i + 0.5) / n) * 2 * Math.PI;
+            name in ink, the number only when it exists. Shed wholesale when
+            the caller has already named the departments in text. */}
+        {labels && departments.map((d, i) => {
+          const mid = -Math.PI / 2 + ((i + 0.5) / total) * 2 * Math.PI;
           const active = d.activity === "active";
           return (
             <div key={d.id} aria-hidden style={{
@@ -342,22 +405,25 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
             </div>
           );
         })}
-        {/* The Constitution: the still center of gravity — near-opaque,
-            gently lit, everything else orbits it. Elevation from the
-            solid material class; no bespoke shadow. */}
+        {/* The still center of gravity — near-opaque, gently lit, everything
+            else orbits it. Defaults to the Constitution (the door to the
+            law); the build surface passes the company name while the org is
+            still a proposal. Elevation from the solid material class. */}
         <button
-          onClick={() => onEnter("constitution")}
+          onClick={center ? center.onClick : () => onEnter("constitution")}
           className="cv-glass cv-glass--solid"
-          aria-label="The Constitution — identity and law"
+          aria-label={center ? (center.ariaLabel ?? center.title) : "The Constitution — identity and law"}
+          disabled={center ? !center.onClick : false}
           style={{
             position: "absolute", left: c - 76, top: c - 76, width: 152, height: 152,
-            borderRadius: "50%", display: "grid", placeItems: "center", cursor: "pointer",
+            borderRadius: "50%", display: "grid", placeItems: "center",
+            cursor: center && !center.onClick ? "default" : "pointer",
             color: "var(--text)", textAlign: "center", padding: "var(--space-2)",
             background: "radial-gradient(120% 120% at 50% 28%, #FFFFFF 40%, #F0EFEA 100%)",
           }}>
           <span>
-            <span style={{ display: "block", fontSize: 10, letterSpacing: ".22em", color: "var(--text-dim)", textTransform: "uppercase" }}>The</span>
-            <span style={{ display: "block", fontWeight: 600, fontSize: "var(--text-base)", letterSpacing: "-.01em" }}>Constitution</span>
+            <span style={{ display: "block", fontSize: 10, letterSpacing: ".22em", color: "var(--text-dim)", textTransform: "uppercase" }}>{center?.eyebrow ?? "The"}</span>
+            <span style={{ display: "block", fontWeight: 600, fontSize: "var(--text-base)", letterSpacing: "-.01em", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 132 }}>{center?.title ?? "Constitution"}</span>
           </span>
         </button>
         {/* The hover snapshot floats as a Popover near its petal (the
@@ -365,7 +431,7 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
             actual use. Pointer-transparent; the petal keeps the events. */}
         {hover && (() => {
           const i = departments.findIndex((d) => d.id === hover.id);
-          const mid = -Math.PI / 2 + ((i + 0.5) / n) * 2 * Math.PI;
+          const mid = -Math.PI / 2 + ((i + 0.5) / total) * 2 * Math.PI;
           const px = c + rc * Math.cos(mid);
           const py = c + (rc - 20) * Math.sin(mid);
           return (
@@ -383,17 +449,27 @@ export function OrgFlywheel({ departments, onEnter, registerPetal, caption }: {
           );
         })()}
       </div>
-      {/* One reserved line under the face: the caption — the compass. The
-          hover snapshot lives in its popover now; this line never swaps. */}
-      <div aria-live="polite" style={{ minHeight: 44, textAlign: "center" }}>
-        {caption ?? (n > 0 ? (
-          <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>hover a department · click to walk in</span>
-        ) : null)}
       </div>
+      {/* One reserved line under the face: the caption — the compass. The
+          hover snapshot lives in its popover now; this line never swaps.
+          `caption={null}` sheds the reserved line entirely (56px with the
+          gap) for a caller that has nothing to say there and needs the
+          height — distinct from `undefined`, which still means "give me the
+          default hint". Review passes null: it had been passing an empty
+          <span> to suppress the hint, and paying the full 44px for it. */}
+      {caption !== null && (
+        <div aria-live="polite" style={{ minHeight: 44, textAlign: "center" }}>
+          {caption ?? (n > 0 ? (
+            <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>hover a department · click to walk in</span>
+          ) : null)}
+        </div>
+      )}
       {n === 0 && (
-        <p className="text-dim" style={{ fontSize: "var(--text-sm)", maxWidth: "40ch", textAlign: "center" }}>
-          No departments yet — the swarm manifest has no root reports. Finish onboarding to grow the wheel.
-        </p>
+        emptyNote !== undefined ? emptyNote : (
+          <p className="text-dim" style={{ fontSize: "var(--text-sm)", maxWidth: "40ch", textAlign: "center" }}>
+            No departments yet — the swarm manifest has no root reports. Build your organization to grow the wheel.
+          </p>
+        )
       )}
     </div>
   );
@@ -501,6 +577,10 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
   // authored. Gravity keeps its capability-chip entry point too. Work
   // (spec Rev 6) is the native runtime: goals, tasks, the review gate.
   const [view, setView] = useState<"work" | "investigations" | "learned" | "gravity" | null>(null);
+  // The instrument zone's measured budget (spec Rev 10) — every list below
+  // clamps against it, and the face measures its own flexed share.
+  const instrumentH = useInstrumentHeight();
+  const [faceRef, faceH] = useMeasuredHeight();
   // Secondary strata start folded on every node — density is earned by
   // interaction, and the choice doesn't follow you to the next desk.
   const [openStrata, setOpenStrata] = useState<Set<string>>(new Set());
@@ -735,7 +815,9 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
     : null;
 
   return (
-    <div>
+    // Rev 10: OrgView fills the instrument zone as a column so an open lens
+    // can flex into the leftover space instead of growing the zone.
+    <div style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}>
       {walk && <WalkTrace {...walk} glyph={glyphFor} />}
 
       {morphProxy}
@@ -887,7 +969,11 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
 
       {/* Work: the native runtime — goals, the task ladder, the review
           gate, the cycle trigger (spec Rev 6). */}
-      {isCompany && view === "work" && <WorkPanel companyId={companyId} />}
+      {/* Rev 10: the lens fills whatever the zones left it and shares that
+          budget internally — it must not size to its own content. */}
+      {isCompany && view === "work" && (
+        <div style={{ flex: 1, minHeight: 0 }}><WorkPanel companyId={companyId} /></div>
+      )}
 
       {/* Investigations: the walk history, grouped by investigation —
           observed hops only, in the trace's own vocabulary. */}
@@ -1001,7 +1087,9 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
               boxShadow: "var(--elev-1)",
               display: "flex", flexDirection: "column", gap: 10,
             }}>
-              {gravQ.data.rows.slice(0, 8).map((r) => {
+              <ClampedList items={gravQ.data.rows} rowPx={52} reservedPx={72} min={2}
+                moreLabel={(hidden, total) => `${total - hidden} of ${total} by pull`}
+                render={(r) => {
                 const g = glyphFor(r.nodeId, r.title);
                 return (
                   <div key={r.nodeId} style={{ display: "grid", gridTemplateColumns: "170px 1fr 44px", gap: "var(--space-3)", alignItems: "center" }}>
@@ -1023,7 +1111,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
                     <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums", fontWeight: 600, fontSize: "var(--text-sm)" }}>{r.gravity}</span>
                   </div>
                 );
-              })}
+              }} />
             </div>
           )}
         </div>
@@ -1033,6 +1121,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
           the desk's record (activity, memory, artifacts) as counted
           previews in the sidebar. Every number is store state. */}
       {isWorkNode && (
+        <div style={{ flex: 1, minHeight: 0 }}>
         <DeskBody
           seeded={!!queueQ.data}
           mine={(queueQ.data?.tasks ?? []).filter((t) => inDesk(t.assigneeSlot))}
@@ -1045,6 +1134,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
           hue={nodeHue}
           onOpenLens={(lens) => { wantView.current = lens; onNavigate("company"); }}
         />
+        </div>
       )}
 
       {/* Relationships (agents): who asks whom — an accumulated record, so
@@ -1076,9 +1166,15 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
           non-petal children as sub-dials), nothing else. A lens open means
           the wheel yields the pane — one object at a time, never stacked. */}
       {isCompany && view === null && (
-        <div style={{ marginTop: "var(--space-2)" }}>
+        // Rev 10: the face region FLEXES and measures itself; the hub row is
+        // pinned. Deriving the face budget by subtracting a guessed chrome
+        // constant from the zone height was off by 67px at the floor — the
+        // clipping the gate caught. Measure, don't estimate.
+        <div style={{ flex: 1, minHeight: 0, marginTop: "var(--space-2)", display: "flex", flexDirection: "column" }}>
+          <div ref={faceRef} style={{ flex: 1, minHeight: 0 }}>
           {fly.data
             ? <OrgFlywheel departments={fly.data.departments} onEnter={enterFromWheel}
+                facePx={faceH - WHEEL_CAPTION_PX}
                 registerPetal={(id, el) => { if (el) petalEls.current.set(id, el); else petalEls.current.delete(id); }}
                 caption={node.objective ? (
                   <span style={{ fontSize: "var(--text-sm)" }}>
@@ -1087,10 +1183,11 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
                   </span>
                 ) : undefined} />
             : <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>spinning up the wheel…</span>}
+          </div>
           {/* Sub-dials: the CEO desk and the instruments, tiny and quiet —
               complications under the face, glanceable, one tap in. */}
           {shownChildren.length > 0 && (
-            <div style={{ display: "flex", justifyContent: "center", gap: "var(--space-2)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
+            <div style={{ flexShrink: 0, display: "flex", justifyContent: "center", gap: "var(--space-2)", marginTop: "var(--space-2)", flexWrap: "wrap" }}>
               {shownChildren.map((c) => (
                 <button key={c.id} onClick={() => onNavigate(c.id)} className="cv-lift"
                   title={`${displayName(c.title)} — ${KIND_LABEL[c.kind]}`}

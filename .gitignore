@@ -5,6 +5,10 @@ node_modules/
 dist/
 build/
 out/
+# …but `build/` is a generic OUTPUT rule, and one SOURCE directory is named
+# build: the Build Your Organization surface. Without this negation the whole
+# onboarding rebuild is invisible to git — untracked and silently uncommittable.
+!packages/onboarding-ui/src/build/
 .next/
 .turbo/
 

@@ -7,15 +7,48 @@
  *  say what's missing; deliverable output renders verbatim, never edited;
  *  status color never travels without its printed status word. */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { wavexOsOnboardingApi, ApiError } from "../wavex-os/lib/api";
+import { ClampedList } from "./ClampedList";
+import { regionBudget, useMeasuredHeight } from "./layout";
 import type { WorkDeliverable, WorkStateResponse, WorkTask, WorkTaskStatus } from "./contract";
+
+/** A region's own label (spec Rev 10). Everything else is measured. */
+const REGION_LABEL_PX = 64;
+/** One collapsed/expanded group header in the ladder. */
+const GROUP_HEADER_PX = 34;
+/** One ladder row.
+ *
+ *  Was 70 when a row was two lines (title + brief). The deliverable-first row
+ *  is ONE line: 9px padding top and bottom around `--text-base` (14px) at
+ *  line-height 1.5 — 39px, rounded to 40 for the border-box.
+ *
+ *  This constant is load-bearing in a way that is easy to miss: it divides
+ *  the region budget into "how many groups can be open", so leaving it at 70
+ *  after halving the row height made the ladder claim half its real capacity
+ *  and auto-close groups that fit perfectly well. The previous note in this
+ *  spot records the same class of error in the other direction. If the row's
+ *  padding or type size changes, change this with it. */
+const LADDER_ROW_PX = 40;
+/** Label + one clamped review card — the queue never renders a sliver. */
+const QUEUE_MIN_PX = 210;
+/** Exception groups first (they arrive open), then the nominal tail. */
+const LADDER_ORDER: WorkTaskStatus[] = ["in_progress", "in_review", "blocked", "failed", "todo", "done"];
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 const displayName = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
+
+/** The ORGANIZATIONAL CATEGORY a slot belongs to — `cpo.build` → `Cpo`.
+ *
+ *  This is the only thing the agent slot is used for on this surface. Whether
+ *  one agent or fifty participate is an internal concern of the orchestration;
+ *  what the operator needs is which part of the organization owns the work.
+ *  The slot never renders. */
+const categoryOf = (slot: string): string => slot.split(".")[0] || slot;
+const categoryLabel = (slot: string): string => displayName(categoryOf(slot));
 
 function ago(iso: string): string {
   const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -52,24 +85,37 @@ const LABEL: CSSProperties = {
   marginBottom: "var(--space-3)",
 };
 
-/** One task as a row — shared by the Work view and the node Queue sections.
- *  showStatus=false inside grouped ladders: the group header already says
- *  the word once; repeating it per row is noise, not information. */
+/** One DELIVERABLE as a row — shared by the Work view and the node Queue.
+ *
+ *  The deliverable is the object the operator interacts with; the task is how
+ *  it gets made and the agent is who makes it, and neither is the subject
+ *  here. The row therefore prints the artifact and its workflow stage, and
+ *  the agent slot appears nowhere — it survives only as the grouping key that
+ *  puts this row under the right category.
+ *
+ *  While a deliverable is in flight the row reads in present continuous
+ *  ("Writing the MVP product spec"); pending and settled it reads as the
+ *  artifact. That is the content/activeForm pair, and it is why the group
+ *  header no longer has to repeat a status word per row.
+ *
+ *  showStatus=false inside grouped ladders: the stage word already travels
+ *  with the row. */
 export function WorkTaskRow({ task, showStatus = true }: { task: WorkTask; showStatus?: boolean }) {
   const tone = TASK_TONE[task.status];
+  const running = task.status === "in_progress";
+  // What this row IS. Falls back through activeForm → deliverable → title so
+  // a work store written before deliverables existed still reads correctly.
+  const primary = running ? (task.activeForm ?? task.title) : (task.deliverable ?? task.title);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "9px 0", minWidth: 0 }}>
-      <span className={task.status === "in_progress" && !REDUCE ? "cv-breathe" : undefined} aria-hidden
+      <span className={running && !REDUCE ? "cv-breathe" : undefined} aria-hidden
         style={{ width: 7, height: 7, borderRadius: "50%", background: tone.dot, flexShrink: 0 }} />
       <span style={{
         fontSize: "var(--text-base)", flex: 1, minWidth: 0,
         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
         color: task.status === "todo" ? "var(--text-dim)" : "var(--text)",
-      }}>
-        {task.title}
-      </span>
-      <span className="text-dim" style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>
-        {displayName(task.assigneeSlot)}
+      }} title={task.title}>
+        {primary}
       </span>
       {task.attempts > 0 && (
         <span className="text-dim" style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}
@@ -77,11 +123,11 @@ export function WorkTaskRow({ task, showStatus = true }: { task: WorkTask; showS
           {task.attempts}/{task.maxAttempts}
         </span>
       )}
-      {showStatus && (
-        <span style={{ color: tone.text, fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>
-          {tone.label}
-        </span>
-      )}
+      {/* The stage word always travels with the row now, because the group
+          header says a CATEGORY rather than a status. */}
+      <span style={{ color: tone.text, fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>
+        {showStatus ? tone.label : tone.label}
+      </span>
     </div>
   );
 }
@@ -97,6 +143,10 @@ function structuralLine(d: WorkDeliverable): string {
 
 export function WorkPanel({ companyId }: { companyId: string }) {
   const qc = useQueryClient();
+  // Rev 10: the two list regions flex against each other inside the lens and
+  // each measures its OWN share. Self-correcting — no guessed chrome math.
+  const [queueRef, queueH] = useMeasuredHeight();
+  const [ladderRef, ladderH] = useMeasuredHeight();
   const [busy, setBusy] = useState<"seed" | "cycle" | null>(null);
   const workQ = useQuery({
     queryKey: ["org-work", companyId],
@@ -112,13 +162,11 @@ export function WorkPanel({ companyId }: { companyId: string }) {
   const [note, setNote] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // The descent (spec Rev 7): exception states arrive open — live work,
-  // work awaiting you, work that broke. Nominal states (todo backlog,
-  // delivered tail) fold to a counted line until asked.
-  const [openGroups, setOpenGroups] = useState<Set<WorkTaskStatus>>(
-    () => new Set<WorkTaskStatus>(["in_progress", "in_review", "blocked", "failed"]),
-  );
-  const toggleGroup = (s: WorkTaskStatus) => setOpenGroups((cur) => {
+  // The descent (spec Rev 7): categories with work that needs attention
+  // arrive open; quiet categories fold to a counted line until asked.
+  // Groups are CATEGORIES now, not statuses — see the ladder below.
+  const [closedGroups, setClosedGroups] = useState<Set<string>>(() => new Set<string>());
+  const toggleGroup = (s: string) => setClosedGroups((cur) => {
     const n = new Set(cur);
     if (n.has(s)) n.delete(s); else n.add(s);
     return n;
@@ -222,10 +270,17 @@ export function WorkPanel({ companyId }: { companyId: string }) {
   const pending = w.deliverables.filter((d) => d.review === "pending_review");
 
   return (
-    <div style={{ marginTop: "var(--space-3)", maxWidth: 760, display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+    // Rev 10: the lens is a COLUMN that shares one budget. Clamping rows
+    // inside each region isn't enough — the regions stack, and their sum is
+    // what overflows. The two list regions flex against each other and each
+    // measures its OWN share, so the split is self-correcting instead of
+    // depending on guessed chrome constants.
+    // No marginTop: `height: 100%` does not account for it, so the margin
+    // pushes the column past its own zone — 12px of silent clipping.
+    <div style={{ maxWidth: 760, height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       {/* The cycle trigger — serial by design in P1 so token attribution
           stays honest; the copy says so instead of pretending parallelism. */}
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", flexWrap: "wrap" }}>
           <button onClick={() => void runCycle()} disabled={busy === "cycle"}>
             {busy === "cycle" ? "Running cycle…" : "Run cycle"}
@@ -239,7 +294,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
       </div>
 
       {/* Goals: the compass — the meter counts DONE tasks, nothing softer. */}
-      <div>
+      <div style={{ flexShrink: 0 }}>
         <div className="text-dim" style={LABEL}>Goals</div>
         {w.goals.length === 0 && <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>No goals yet.</span>}
         {w.goals.map((g) => {
@@ -268,27 +323,53 @@ export function WorkPanel({ companyId }: { companyId: string }) {
 
       {/* The review queue: the semantic gate. Output renders verbatim —
           approve closes the task, changes fold feedback into the next brief. */}
-      <div>
+      {/* The queue is this lens's actionable core (Rev 7), so it claims a
+          floor of one full card and the ladder yields around it. Without the
+          minHeight, flex hands the space to the ladder's content-sized basis
+          and the queue renders a 67px sliver of a card. */}
+      {/* `1 1 0`, never `1 1 auto`: an auto basis makes the allocation depend
+          on the content while the content depends on the allocation — cards
+          grow the basis, the basis grows the allocation, which fits another
+          card. That loop runs forever. The minHeight, not the basis, is what
+          guarantees the queue its floor. */}
+      <div ref={queueRef} style={{
+        // An EMPTY queue is one line and must not hold a share of the lens —
+        // it goes fixed-size so the ladder inherits the room. It only claims
+        // a flexible share (and its minimum) once it has cards to show.
+        flex: pending.length > 0 ? "1 1 0" : "0 0 auto",
+        minHeight: pending.length > 0 ? QUEUE_MIN_PX : 0,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+      }}>
         <div className="text-dim" style={LABEL}>Awaiting review</div>
         {pending.length === 0 && <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>Nothing awaiting review.</span>}
         {pending.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-            {pending.map((d) => {
+            {/* The fit law (spec Rev 10): review cards are budgeted. An
+                unreviewed deliverable that doesn't fit stays counted, not
+                hidden — the queue never lies about its depth. */}
+            <ClampedList items={pending} rowPx={openOutput.size > 0 ? 420 : 190} availPx={queueH} reservedPx={REGION_LABEL_PX} min={1}
+              moreLabel={(hidden, total) => `${total - hidden} of ${total} awaiting review · approve to see the next`}
+              render={(d) => {
               const task = taskById.get(d.taskId);
               return (
                 <div key={d.id} style={PANEL}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontSize: "var(--text-base)", fontWeight: 600 }}>{task?.title ?? d.taskId}</span>
                     <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>
-                      attempt {d.attempt}{task ? ` of ${task.maxAttempts}` : ""}{task ? ` · ${displayName(task.assigneeSlot)}` : ""}
+                      attempt {d.attempt}{task ? ` of ${task.maxAttempts}` : ""}{task ? ` · ${categoryLabel(task.assigneeSlot)}` : ""}
                     </span>
                   </div>
                   <div className="text-dim" style={{ fontSize: "var(--text-xs)", marginTop: 2 }}>
                     {structuralLine(d)} · {ago(d.createdAt)}
                   </div>
                   {/* Verbatim always — the descent only controls how much
-                      unrolls: three lines by default, everything on ask. */}
-                  <pre style={{
+                      unrolls: three lines by default, everything on ask.
+                      NAMED EXCEPTION 2 of 2 (spec Rev 10): unrolled output
+                      scrolls inside its own box. L3 IS the deepest level, so
+                      there is nowhere to descend to, and the honesty law
+                      requires engine output render verbatim — a clamp here
+                      would be the interface editing the machine's words. */}
+                  <pre className={openOutput.has(d.id) ? "cv-record" : undefined} style={{
                     margin: "var(--space-3) 0 0", padding: "var(--space-3) var(--space-4)",
                     fontSize: "var(--text-xs)", fontFamily: "var(--font-mono)", lineHeight: 1.55,
                     whiteSpace: "pre-wrap", wordBreak: "break-word",
@@ -335,7 +416,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
                   )}
                 </div>
               );
-            })}
+            }} />
           </div>
         )}
       </div>
@@ -343,33 +424,105 @@ export function WorkPanel({ companyId }: { companyId: string }) {
       {/* The task ladder — grouped by status. Exceptions (running, awaiting
           you, broken) arrive open; the nominal backlog and the delivered
           tail fold to counted lines. Every row is real store state. */}
-      <div>
-        <div className="text-dim" style={LABEL}>Tasks</div>
+      {/* `flex: 1 1 0`, NOT `0 1 auto`, and that is load-bearing: an
+          auto basis makes the allocation depend on the content, while the
+          fold below depends on the allocation — fold shrinks the content,
+          which grows the allocation, which unfolds it, forever. A zero basis
+          makes the allocation purely the leftover space, so the fold decision
+          has no feedback path. The queue's minHeight is what protects it. */}
+      <div ref={ladderRef} style={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div className="text-dim" style={LABEL}>Deliverables</div>
         {w.tasks.length === 0 && <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>Nothing queued.</span>}
-        {w.tasks.length > 0 && (
+        {w.tasks.length > 0 && (() => {
+          // GROUPED BY CATEGORY, not by status. The status ladder answered
+          // "what state is everything in"; the review queue above already
+          // answers "what needs me", which is this lens's actionable core.
+          // What the category grouping answers is what the operator actually
+          // asks — what is each part of my organization producing — and it is
+          // the grouping that makes agents disappear: the slot decides which
+          // bucket a row lands in and is never rendered.
+          const byCat = new Map<string, WorkTask[]>();
+          for (const t of w.tasks) {
+            const c = categoryOf(t.assigneeSlot);
+            (byCat.get(c) ?? byCat.set(c, []).get(c)!).push(t);
+          }
+          const needsAttention = (t: WorkTask) => t.status === "in_review" || t.status === "failed" || t.status === "blocked";
+          // Categories with work that needs attention sort first, then the
+          // ones with work in flight, then the rest — the same descent the
+          // status ladder encoded, now expressed over categories.
+          const rank = (ts: WorkTask[]) =>
+            ts.some(needsAttention) ? 0 : ts.some((t) => t.status === "in_progress") ? 1 : 2;
+          const present = [...byCat.entries()].sort((a, b) => rank(a[1]) - rank(b[1]) || a[0].localeCompare(b[0]));
+          const rowsBudget = regionBudget(ladderH, REGION_LABEL_PX + present.length * GROUP_HEADER_PX);
+          // How many groups can be open AND still show a row each. Categories
+          // are more numerous than statuses were (six departments where the
+          // status ladder had four), so "open everything" starves the budget
+          // and renders headers with no room beneath them — present in the
+          // DOM, clipped out of view, which is the silent cap the fit law
+          // exists to forbid. Groups past the budget close themselves, and
+          // the ranking already put the ones needing attention first.
+          const canOpen = rowsBudget === 0
+            ? present.length
+            : Math.max(1, Math.floor(rowsBudget / LADDER_ROW_PX));
+          const autoOpen = new Set(present.slice(0, canOpen).map(([c]) => c));
+          const open = (c: string) => autoOpen.has(c) && !closedGroups.has(c);
+          const openCount = present.filter(([c]) => open(c)).length;
+          const perGroupPx = rowsBudget === 0 ? 0 : Math.max(1, rowsBudget / Math.max(1, openCount));
+
+          // The density gradient made real: when the window cannot even seat
+          // the category headers, the whole ladder folds to ONE counted line.
+          if (ladderH > 0 && ladderH < REGION_LABEL_PX + present.length * GROUP_HEADER_PX) {
+            const needsYou = w.tasks.filter(needsAttention).length;
+            return (
+              <div style={{ ...PANEL, padding: "var(--space-3) var(--space-4)" }}>
+                <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>
+                  {w.tasks.length} deliverable{w.tasks.length === 1 ? "" : "s"} across {present.length} department{present.length === 1 ? "" : "s"}
+                  {needsYou > 0 ? ` · ${needsYou} awaiting you` : ""} — open a desk to see them
+                </span>
+              </div>
+            );
+          }
+          return (
           <div style={{ ...PANEL, padding: "var(--space-2) var(--space-4)", display: "flex", flexDirection: "column" }}>
-            {(["in_progress", "in_review", "blocked", "failed", "todo", "done"] as WorkTaskStatus[]).map((status) => {
-              const group = w.tasks.filter((t) => t.status === status);
-              if (group.length === 0) return null;
-              const tone = TASK_TONE[status];
-              const open = openGroups.has(status);
+            {present.map(([cat, group]) => {
+              const isOpen = open(cat);
+              const attention = group.filter(needsAttention).length;
+              const running = group.filter((t) => t.status === "in_progress").length;
+              const done = group.filter((t) => t.status === "done").length;
               return (
-                <div key={status}>
-                  <button onClick={() => toggleGroup(status)} aria-expanded={open}
+                <div key={cat}>
+                  <button onClick={() => toggleGroup(cat)} aria-expanded={isOpen}
                     style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, minHeight: 34, width: "100%" }}>
-                    <span style={{ color: tone.text, fontSize: "var(--text-xs)" }}>{tone.label}</span>
-                    <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>· {group.length}</span>
+                    <span style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>{displayName(cat)}</span>
+                    {/* Counted progress, never a percentage: done/total is
+                        real store state. A per-deliverable percentage would
+                        be a fabricated metric. */}
+                    <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>· {done}/{group.length} done</span>
+                    {running > 0 && (
+                      <span style={{ color: "var(--live)", fontSize: "var(--text-xs)" }}>· {running} running</span>
+                    )}
+                    {attention > 0 && (
+                      <span style={{ color: "var(--attend)", fontSize: "var(--text-xs)" }}>· {attention} needs you</span>
+                    )}
                     <span className="text-dim" aria-hidden style={{
-                      fontSize: "var(--text-xs)", display: "inline-block",
-                      transform: open ? "rotate(90deg)" : "none", transition: "transform 130ms var(--ease)",
+                      fontSize: "var(--text-xs)", display: "inline-block", marginLeft: "auto",
+                      transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 130ms var(--ease)",
                     }}>▸</span>
                   </button>
-                  {open && group.map((t) => <WorkTaskRow key={t.id} task={t} showStatus={false} />)}
+                  {/* Rev 10: an expanded group shows what fits and counts the
+                      rest. min 1 — expanding is an explicit act, and an act
+                      that returns nothing is worse than one row too many. */}
+                  {isOpen && (
+                    <ClampedList items={group} rowPx={LADDER_ROW_PX} availPx={perGroupPx} min={1}
+                      moreLabel={(hidden, total) => `+${hidden} more in ${displayName(cat)} (${total} total)`}
+                      render={(t) => <WorkTaskRow key={t.id} task={t} showStatus={false} />} />
+                  )}
                 </div>
               );
             })}
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

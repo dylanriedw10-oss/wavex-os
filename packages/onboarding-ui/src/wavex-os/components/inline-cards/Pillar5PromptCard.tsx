@@ -1,15 +1,22 @@
-/** Inline prompt card for Pillar 5 — board communication channel +
- *  conditional urgency routing + conditional Telegram credentials. */
+/** Inline prompt card for Pillar 5 — where the organization reports to you,
+ *  plus the credentials that channel needs.
+ *
+ *  Asked here because it decides a REQUIRED connector; the question and the
+ *  marker it lights up belong in the same phase.
+ *
+ *  The urgency-routing follow-up is gone. Its two options ("immediately" vs
+ *  "daily digest") set a field the runtime never reads when deciding when to
+ *  message anyone — the routing is the board's, not the operator's — so the
+ *  ask implied a control that did not exist. */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { usePillarSuggestion } from "../../lib/use-pillar-suggestion";
-import type { Pillar5Response, CommChannel, UrgencyRouting } from "@wavex-os/plugin-onboarding";
+import type { Pillar5Response, CommChannel } from "@wavex-os/plugin-onboarding";
 import { wavexOsOnboardingApi, ApiError } from "../../lib/api";
 import { ResponseChips } from "../ResponseChips";
-import { COMM_CHANNELS, URGENCY_ROUTES } from "../../lib/options";
+import { COMM_CHANNELS } from "../../lib/options";
 
 const COMM_OPTS = COMM_CHANNELS.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
-const URGENCY_OPTS = URGENCY_ROUTES.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
 
 interface Props {
   companyId: string;
@@ -19,8 +26,6 @@ interface Props {
 export function Pillar5PromptCard({ companyId, onDone }: Props) {
   const [commCanon, setCommCanon] = useState<string[]>([]);
   const [commCustom, setCommCustom] = useState<string[]>([]);
-  const [urgencyCanon, setUrgencyCanon] = useState<string[]>([]);
-  const [urgencyCustom, setUrgencyCustom] = useState<string[]>([]);
   const [tgBotToken, setTgBotToken] = useState("");
   const [tgChatId, setTgChatId] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -28,30 +33,22 @@ export function Pillar5PromptCard({ companyId, onDone }: Props) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; detail: string } | null>(null);
 
-  // Inference-grounded suggestion for comm_channel + urgency_routing,
+  // Inference-grounded suggestion for comm_channel,
   // based on Pillar 1/3/4 context. Auto-preselects when Claude has a
   // confident pick; operator can override freely.
+  // NO AUTO-SELECT. The suggestion is SHOWN — sparkle outline, reasoning line —
+  // and the operator clicks it.
+  //
+  // Preselecting made `ready` true with zero interaction, so one click on
+  // Continue persisted a model's guess as the operator's stated answer, and
+  // nothing recorded whether a chip was ever touched. Every downstream
+  // consumer then read it as `operator-claimed`: the placement rung, the
+  // capability graph, the claim ledger, the contradiction detector. One click
+  // is the entire difference between a claim and a guess, and it is worth it.
   const suggestion = usePillarSuggestion(5, companyId);
   const suggestedComm = typeof suggestion.recommended.comm_channel === "string"
     ? (suggestion.recommended.comm_channel as string)
     : null;
-  const suggestedUrgency = typeof suggestion.recommended.urgency_routing === "string"
-    ? (suggestion.recommended.urgency_routing as string)
-    : null;
-  useEffect(() => {
-    if (!suggestion.loaded) return;
-    if (commCanon.length > 0 || commCustom.length > 0) return;
-    if (suggestedComm && COMM_OPTS.some((o) => o.value === suggestedComm)) {
-      setCommCanon([suggestedComm]);
-    }
-  }, [suggestion.loaded, suggestedComm]);
-  useEffect(() => {
-    if (!suggestion.loaded) return;
-    if (urgencyCanon.length > 0 || urgencyCustom.length > 0) return;
-    if (suggestedUrgency && URGENCY_OPTS.some((o) => o.value === suggestedUrgency)) {
-      setUrgencyCanon([suggestedUrgency]);
-    }
-  }, [suggestion.loaded, suggestedUrgency]);
 
   async function handleTestSend(): Promise<void> {
     if (!tgBotToken || !tgChatId) return;
@@ -73,13 +70,10 @@ export function Pillar5PromptCard({ companyId, onDone }: Props) {
 
   const commValue = commCustom[0] ?? commCanon[0] ?? "";
   const commIsCustom = commCustom.length > 0;
-  const needsUrgency = !!commValue && commValue !== "email_only";
-  const urgencyValue = urgencyCustom[0] ?? urgencyCanon[0] ?? "";
-  const urgencyIsCustom = urgencyCustom.length > 0;
   const isTelegram = commValue === "telegram";
 
   const telegramReady = !isTelegram || (!!tgBotToken && !!tgChatId);
-  const ready = !!commValue && (!needsUrgency || !!urgencyValue) && telegramReady;
+  const ready = !!commValue && telegramReady;
 
   async function handleSubmit(): Promise<void> {
     if (!ready) return;
@@ -94,10 +88,6 @@ export function Pillar5PromptCard({ companyId, onDone }: Props) {
         companyId,
         comm_channel: (commIsCustom ? "other" : commValue) as CommChannel,
         comm_channel_other: commIsCustom ? commValue : undefined,
-        urgency_routing: needsUrgency
-          ? ((urgencyIsCustom ? "other" : urgencyValue) as UrgencyRouting)
-          : undefined,
-        urgency_routing_other: needsUrgency && urgencyIsCustom ? urgencyValue : undefined,
         board_endpoint_config: Object.keys(board_endpoint_config).length > 0 ? board_endpoint_config : undefined,
       });
       onDone(result.response);
@@ -136,8 +126,8 @@ export function Pillar5PromptCard({ companyId, onDone }: Props) {
           customValues={commCustom}
           allowCustom
           customLabel="Other channel"
-          onChange={(v) => { setCommCanon(v); setUrgencyCanon([]); setUrgencyCustom([]); }}
-          onCustomChange={(v) => { setCommCustom(v); setUrgencyCanon([]); setUrgencyCustom([]); }}
+          onChange={setCommCanon}
+          onCustomChange={setCommCustom}
           disabled={submitting}
           suggestedValues={suggestedComm ? [suggestedComm as typeof COMM_OPTS[number]["value"]] : []}
         />
@@ -193,25 +183,6 @@ export function Pillar5PromptCard({ companyId, onDone }: Props) {
         </div>
       )}
 
-      {needsUrgency && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: "0.35rem", color: "var(--text-dim)" }}>
-            Urgency routing
-          </div>
-          <ResponseChips
-            mode="single"
-            options={URGENCY_OPTS}
-            values={urgencyCanon}
-            customValues={urgencyCustom}
-            allowCustom
-            customLabel="Other routing"
-            onChange={setUrgencyCanon}
-            onCustomChange={setUrgencyCustom}
-            disabled={submitting}
-            suggestedValues={suggestedUrgency ? [suggestedUrgency as typeof URGENCY_OPTS[number]["value"]] : []}
-          />
-        </div>
-      )}
 
       {error && (
         <div style={{ color: "var(--warning)", fontSize: 12 }}>✗ {error}</div>

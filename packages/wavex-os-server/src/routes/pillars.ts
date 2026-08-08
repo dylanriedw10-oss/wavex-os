@@ -20,6 +20,7 @@ import {
 } from "@wavex-os/plugin-onboarding";
 import type { Pillar1Response } from "@wavex-os/plugin-onboarding";
 import { route as tierRoute } from "@wavex-os/plugin-tier-router";
+import { fetchPage } from "../lib/url-prefetch.js";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
 import { getInferenceMode } from "@wavex-os/inference-adapter";
 import { withTokenAccounting, type PhaseKey } from "../lib/token-accounting.js";
@@ -150,7 +151,13 @@ async function consolidatedPillar1Enrich(opts: {
     enrichment_status: "enriched",
     has_product: typeof refined.has_product === "boolean" ? refined.has_product : true,
     industry_hint: s(refined.industry_hint) ?? "unknown",
-    business_model_hint: s(refined.business_model_hint) ?? "subscription",
+    // "unknown", not "subscription". The enum carries the honest sentinel,
+    // the prompt above explicitly instructs the model to use it, and the
+    // sibling line does. Defaulting to a real business model turned "the
+    // model said nothing" into the extracted claim "they sell subscriptions"
+    // — indistinguishable from an answer, and rendered as a fact chip on the
+    // operator's own company core.
+    business_model_hint: s(refined.business_model_hint) ?? "unknown",
     ideal_customer_profile: s(refined.ideal_customer_profile),
     revenue_model: s(refined.revenue_model),
     competitive_position: s(refined.competitive_position),
@@ -179,7 +186,6 @@ async function consolidatedPillar1Enrich(opts: {
 // Fallback: if URL fetch fails or combined T2 fails, we fall through to the
 // original vendored path so onboarding never hard-blocks.
 
-const COMBINED_FETCH_TIMEOUT_MS = 8_000;
 const COMBINED_T2_TIMEOUT_MS = 45_000;
 const COMBINED_URL_CONTENT_MAX = 12_000;
 
@@ -190,23 +196,15 @@ function looksLikeUrl(s: string): boolean {
 
 async function fetchUrlContent(rawInput: string): Promise<string | null> {
   if (!looksLikeUrl(rawInput)) return null;
-  try {
-    const first = rawInput.trim().split(/\s/)[0];
-    const url = /^https?:\/\//i.test(first) ? first : `https://${first}`;
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), COMBINED_FETCH_TIMEOUT_MS);
-    const res = await fetch(url, {
-      signal: ctl.signal,
-      headers: { "User-Agent": "WaveX-OS/1.0 (onboarding-enrichment)" },
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const html = await res.text();
-    const text = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    return text.length >= 100 ? text.slice(0, COMBINED_URL_CONTENT_MAX) : null;
-  } catch {
-    return null;
-  }
+  // The hardened fetcher (lib/url-prefetch.ts): SSRF host filter, one-hop
+  // meta-refresh follow, parked-domain + thin-content detection. The old
+  // inline fetch here had none of those — a parked domain fed the model
+  // "buy this domain" prose and it confidently invented a company from it.
+  // The null contract is unchanged: any non-ok outcome degrades to the
+  // no-homepage prompt path.
+  const page = await fetchPage(rawInput);
+  if (page.status !== "ok" || !page.body) return null;
+  return page.body.slice(0, COMBINED_URL_CONTENT_MAX);
 }
 
 function buildCombinedEnrichmentPrompt(opts: {
@@ -239,7 +237,7 @@ Rules:
 Return ONLY this JSON object — no prose, no markdown fences:
 {
   "company_context": "150-300 words describing what the company does, who it serves, how it makes money, and what is distinctive",
-  "industry_hint": "enterprise_saas|b2c|dev_tools|marketplace|ecommerce|fintech|healthtech|edtech|legal_tech|consumer_mobile|services_to_saas|dev_infrastructure|consumer_hardware|consumer_ai|unknown",
+  "industry_hint": "enterprise_saas|b2b_saas|b2c|dev_tools|marketplace|dtc_ecommerce|fintech|fintech_retail|healthtech|edtech|legal_tech|consumer_mobile|agency_services|services_to_saas|dev_infrastructure|consumer_hardware|consumer_ai|unknown",
   "business_model_hint": "subscription|usage_based|one_time|marketplace|open_core|unknown",
   "ideal_customer_profile": "≤60 chars — who the product serves",
   "revenue_model": "≤40 chars — how money is made",
@@ -253,7 +251,7 @@ Return ONLY this JSON object — no prose, no markdown fences:
 }`;
 }
 
-async function runCombinedPillar1Enrichment(opts: {
+export async function runCombinedPillar1Enrichment(opts: {
   orgName: string;
   rawInput: string;
   urlContent: string | null;
@@ -291,7 +289,8 @@ async function runCombinedPillar1Enrichment(opts: {
     enrichment_status: "enriched",
     has_product: typeof p.has_product === "boolean" ? p.has_product : true,
     industry_hint: typeof p.industry_hint === "string" ? p.industry_hint : "unknown",
-    business_model_hint: typeof p.business_model_hint === "string" ? p.business_model_hint : "subscription",
+    // See the manual-context path: absence is "unknown", never a real model.
+    business_model_hint: typeof p.business_model_hint === "string" ? p.business_model_hint : "unknown",
     ideal_customer_profile: typeof p.ideal_customer_profile === "string" ? p.ideal_customer_profile : null,
     revenue_model: typeof p.revenue_model === "string" ? p.revenue_model : null,
     competitive_position: typeof p.competitive_position === "string" ? p.competitive_position : null,
@@ -715,11 +714,12 @@ Output ONLY the sentence — no quotes, no markdown, no preamble.`;
       // Claude a constrained answer space and validate the output.
       const fieldSpecs: Record<number, { fields: string; valid: Record<string, string[]> }> = {
         3: {
-          fields: "product_state, stage",
+          // `stage` is no longer ASKED — it derives from the number Strategy
+          // collects. Requesting it spent tokens on a field the card cannot
+          // apply, in a vocabulary sharing ZERO values with the shipped chips.
+          fields: "product_state",
           valid: {
             product_state: ["live_paying_customers", "built_not_selling", "prototype_mvp", "idea_only"],
-            stage: ["0_10k_mrr", "10k_100k_mrr", "100k_1m_mrr", "1m_10m_mrr", "10m_plus_mrr",
-                    "pre_revenue_validating", "pre_revenue_building", "pre_revenue_idea"],
           },
         },
         4: {
@@ -727,7 +727,7 @@ Output ONLY the sentence — no quotes, no markdown, no preamble.`;
           valid: {
             lead_sources: ["inbound_ads_meta_google", "outbound_cold", "referral_word_of_mouth",
                            "content_seo", "product_led_viral", "partnerships", "events", "none_yet"],
-            sales_motion: ["plg_self_serve", "assisted_demo", "high_touch_enterprise",
+            sales_motion: ["self_serve_plg", "assisted_demo", "high_touch_enterprise",
                            "services_to_saas", "marketplace", "transactional", "no_motion_yet"],
           },
         },

@@ -262,7 +262,7 @@ export interface WorkGoal {
   title: string;
   description: string;
   status: "active" | "achieved" | "cancelled";
-  source: "manifest" | "operator";
+  source: "manifest" | "operator" | "plan";
   createdAt: string;
 }
 
@@ -271,6 +271,12 @@ export interface WorkTask {
   goalId: string;
   title: string;
   brief: string;
+  /** THE ARTIFACT this task produces — deliverables are the UI. Optional so
+   *  work stores written before this existed still parse. */
+  deliverable?: string;
+  /** Present-continuous, shown ONLY while running. `title` is shown pending
+   *  and settled. (The content/activeForm pair.) */
+  activeForm?: string;
   assigneeSlot: string;
   status: WorkTaskStatus;
   dependsOn: string[];

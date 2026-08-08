@@ -57,12 +57,17 @@ test.describe("native work runtime", () => {
     await expect(page.getByText("0/2 done")).toBeVisible();
     await expect(page.getByText("Nothing awaiting review.")).toBeVisible();
 
-    // The nominal backlog arrives FOLDED (density gradient) — a counted
-    // line; the rows exist one tap down.
-    await expect(page.getByText("Establish ceo operating baseline")).toHaveCount(0);
-    await page.getByRole("button", { name: /todo/ }).click();
-    await expect(page.getByText("Establish ceo operating baseline")).toBeVisible();
-    await expect(page.getByText("Establish growth operating baseline")).toBeVisible();
+    // Deliverables grouped by DEPARTMENT, not by status (EXECUTION_MODEL.md).
+    // The header carries counted progress; the agent slot appears nowhere.
+    await expect(page.getByRole("button", { name: /0\/1 done/ }).first()).toBeVisible();
+    // The bootstrap tasks are present as their own rows.
+    // The row prints the ARTIFACT — deliverables are the UI. The imperative
+    // title survives as the row's accessible name, not as its visible text.
+    await expect(page.getByText("The ceo function's operating baseline").first()).toBeVisible();
+    await expect(page.getByText("The growth function's operating baseline").first()).toBeVisible();
+    // …and the agent slot appears nowhere the operator can read it.
+    await expect(page.getByText("Ceo.orchestrator", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("ceo.orchestrator", { exact: true })).toHaveCount(0);
   });
 
   test("the desk: hero, working-on rows, and the reporting structure", async ({ page }) => {
@@ -75,8 +80,8 @@ test.describe("native work runtime", () => {
     // The CEO desk sweeps its reports too — both bootstrap tasks appear.
     // (.first(): the ceo title also shows in the hero's next-in-queue line.)
     await expect(page.getByText("Working on", { exact: true })).toBeVisible();
-    await expect(page.getByText("Establish ceo operating baseline").first()).toBeVisible();
-    await expect(page.getByText("Establish growth operating baseline").first()).toBeVisible();
+    await expect(page.getByText("Establish the ceo operating baseline").first()).toBeVisible();
+    await expect(page.getByText("Establish the growth operating baseline").first()).toBeVisible();
     // The reporting structure renders from children data alone.
     await expect(page.getByText(/Reporting structure/)).toBeVisible();
     await expect(page.getByRole("button", { name: "View Org" })).toBeVisible();
@@ -99,11 +104,19 @@ test.describe("native work runtime", () => {
     await page.getByRole("button", { name: "Show full output" }).first().click();
     await expect(page.getByText(/requesting changes requeues it with feedback/).first()).toBeVisible();
 
-    // Approve one: its task closes, the goal meter counts it, and the
-    // delivered tail appears as a folded group.
+    // Approve one: its task closes and the goal meter counts it. There is no
+    // "done" GROUP any more — groups are departments, and progress is the
+    // counted `n/m done` on the group's own header (EXECUTION_MODEL.md).
     await page.getByRole("button", { name: "Approve" }).first().click();
     await expect(page.getByText("1/2 done")).toBeVisible();
-    await expect(page.getByText("done", { exact: true })).toBeVisible();
+    // The ladder states its counts in one of two forms depending on the
+    // density it was given: per-department headers when there is room, and a
+    // single counted line when the review queue has taken the space. Both are
+    // the gradient working; asserting either would be asserting a viewport.
+    await expect(
+      page.getByRole("button", { name: /\d+\/\d+ done/ }).first()
+        .or(page.getByText(/\d+ deliverables? across \d+ department/)),
+    ).toBeVisible();
   });
 
   test("request changes → the task requeues with the feedback and a burned attempt", async ({ page }) => {
@@ -115,12 +128,15 @@ test.describe("native work runtime", () => {
     await page.getByLabel("Change request feedback").fill("tighten the plan");
     await page.getByRole("button", { name: "Send feedback" }).click();
 
-    // The loop that never gives up: back to the folded todo group; the
-    // burned attempt (1/3) is one tap down.
+    // The loop that never gives up: the deliverable is back in its department
+    // with the attempt burned. With the queue emptied the ladder has room
+    // again, so the rows are there — and the row states its own stage rather
+    // than sitting under a status header.
     await expect(page.getByText("Nothing awaiting review.")).toBeVisible();
-    await expect(page.getByText("todo", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: /todo/ }).click();
+    await expect(page.getByText("todo", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("1/3", { exact: true }).first()).toBeVisible();
+    // …and the agent slot is nowhere in the operator's view.
+    await expect(page.getByText("Ceo.orchestrator", { exact: true })).toHaveCount(0);
   });
 
   test("the runtime tray: now, up next, just finished — one overlay, esc closes", async ({ page }) => {
@@ -131,7 +147,7 @@ test.describe("native work runtime", () => {
     await expect(page.getByText("Nothing running.")).toBeVisible();
     await expect(page.getByText("Up next", { exact: true })).toBeVisible();
     // The requeued ceo task (attempt burned, under ceiling) is ready again.
-    await expect(page.getByText("Establish ceo operating baseline").first()).toBeVisible();
+    await expect(page.getByText("Establish the ceo operating baseline").first()).toBeVisible();
     // The accumulated record: the growth approval from the earlier test.
     await expect(page.getByText("Just finished", { exact: true })).toBeVisible();
     await expect(page.getByText(/Approved · /).first()).toBeVisible();

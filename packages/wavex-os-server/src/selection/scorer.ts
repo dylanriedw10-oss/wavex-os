@@ -68,21 +68,75 @@ function deriveGtm(manifest: CompanyManifest): Gtm | null {
   const sources: string[] = (p4 as { lead_sources?: string[] }).lead_sources ?? [];
   if (motion === "none_yet") return "none-yet";
   if (motion === "self_serve_plg") {
-    // Distinguish self-serve from paid-led + community-led + referral-led
-    if (sources.includes("inbound_ads_meta_google") && sources.length <= 2) return "paid-led";
-    if (sources.includes("content_seo") && sources.length <= 2) return "community-led";
-    if (sources.includes("referral_word_of_mouth") && sources.length <= 2) return "referral-led";
-    return "self-serve";
+    // The card collecting lead_sources says "up to 3, PRIMARY FIRST", so the
+    // operator's own ranking decides — not `.includes()` over an unordered
+    // set, and not a length gate.
+    //
+    // The previous shape had both defects: it asked "does this appear
+    // anywhere" and then refused to answer at all when three were named
+    // (`sources.length <= 2`), so any operator who used the full allowance
+    // fell through to a generic "self-serve" and got a different agent
+    // roster than one who named the same primary and stopped at two.
+    switch (sources[0]) {
+      case "inbound_ads_meta_google": return "paid-led";
+      case "content_seo": return "community-led";
+      case "referral_word_of_mouth": return "referral-led";
+      default: return "self-serve";
+    }
   }
   if (motion === "high_touch_enterprise") return "high-touch-enterprise";
   if (motion === "assisted_demo") return "assisted-demo";
   return null;
 }
 
+/** The `Stage` axis carries 0.20 of the template score, and it has been very
+ *  nearly dead.
+ *
+ *  `Stage` is an ARR ladder — `0_10k_arr`, `100k_500k_arr`, `1m_5m_arr` … —
+ *  with one member spelled `10k_100k_mrr`. That is a typo for
+ *  `10k_100k_arr`, and the fact that it coincidentally matches a shipped MRR
+ *  chip is the only reason ANY company ever scored on this axis. Every
+ *  producer of `pillar_3.stage` emits MRR-denominated ids
+ *  (`less_than_10k_mrr`, `100k_1m_mrr`, …), and the old body cast the string
+ *  straight into the union, so an unrecognised value matched no affinity and
+ *  silently scored zero forever.
+ *
+ *  Renaming the union member would touch ten affinity entries and change
+ *  scoring in a way this change cannot validate, so the repair happens at the
+ *  BOUNDARY instead: convert to ARR and pick the band.
+ *
+ *  Preferring the goal's real number over the band string is not an
+ *  optimisation — it is the only exact route. A band like
+ *  `less_than_10k_mrr` spans 0–120k ARR, which crosses three ARR bands, so
+ *  from the string alone the honest answer is `null`. */
+const ARR_BANDS: Array<{ maxExclusive: number; stage: Stage }> = [
+  { maxExclusive: 10_000, stage: "0_10k_arr" },
+  { maxExclusive: 100_000, stage: "10k_100k_mrr" },   // the typo'd 10k-100k ARR member
+  { maxExclusive: 500_000, stage: "100k_500k_arr" },
+  { maxExclusive: 1_000_000, stage: "500k_1m_arr" },
+  { maxExclusive: 5_000_000, stage: "1m_5m_arr" },
+  { maxExclusive: 10_000_000, stage: "5m_10m_arr" },
+  { maxExclusive: Infinity, stage: "10m_plus_arr" },
+];
+
+const PRE_REVENUE = new Set(["pre_product", "pre_launch", "soft_launched"]);
+
 function deriveStage(manifest: CompanyManifest): Stage | null {
   const stage = (manifest.pillar_responses.pillar_3 as { stage?: string }).stage;
-  if (!stage) return null;
-  return stage as Stage;
+  if (stage && PRE_REVENUE.has(stage)) return "pre_product";
+
+  // Exact route: the goal's own baseline, annualised. Only when the goal is
+  // revenue-denominated — an activation-rate baseline of 22 is not $22/mo.
+  const goal = (manifest as unknown as { goal?: { kpiId?: string; current?: number } }).goal;
+  if (goal?.kpiId === "monthly_recurring_revenue" && typeof goal.current === "number") {
+    return ARR_BANDS.find((b) => goal.current! * 12 < b.maxExclusive)!.stage;
+  }
+
+  // Band-only route. Almost everything is ambiguous across ARR bands, and
+  // `null` skips the axis honestly rather than matching nothing while
+  // pretending to have an opinion.
+  if (stage === "more_than_1m_mrr") return "10m_plus_arr";   // >$12M ARR — unambiguous
+  return null;
 }
 
 function buildContext(manifest: CompanyManifest): SignalContext {
@@ -215,3 +269,11 @@ export function selectTemplatesForManifest(
 
   return out;
 }
+
+/** Test seam. `deriveGtm` decides which agent templates a company gets, and
+ *  its ordering contract is the kind that regresses silently. */
+export const __testDeriveGtm = deriveGtm;
+/** Test seam. The stage axis is 0.20 of the template score and its ARR/MRR
+ *  mismatch was invisible for the same reason every bug in this file was:
+ *  a mismatch scores zero, and zero looks exactly like "no signal". */
+export const __testDeriveStage = deriveStage;

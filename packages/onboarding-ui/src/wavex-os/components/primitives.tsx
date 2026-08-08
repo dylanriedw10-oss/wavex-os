@@ -1,19 +1,46 @@
-/** Wavex-os-style UI primitives — small reusable components that match
- * the wavex-os dark theme (var(--accent), var(--surface), etc.). */
+/** The onboarding vocabulary, built on the architectural design system.
+ *
+ *  Every pillar and phase composes from these six, so they are the highest-
+ *  leverage file in the standardization: getting them right moves most of the
+ *  57-file surface without touching it.
+ *
+ *  Rules they encode (docs/design/COMPONENT_RULES.md):
+ *    - paper is `.cv-paper` — panel fill, hairline, radius-lg, elev-1
+ *    - selection wears `--mind`; color is state, never "clickable"
+ *    - controls never cast a shadow; surfaces do
+ *    - 44px minimum tap targets */
 
 import { useState, type ReactNode } from "react";
+import { Ic } from "../../canvas/icons";
 
 export function H2({ children }: { children: ReactNode }) {
-  return <h2 style={{ fontSize: 22, fontWeight: 700, marginTop: 0, marginBottom: "0.5rem" }}>{children}</h2>;
+  // The canvas masthead voice: one confident title, tight tracking.
+  return (
+    <h2 style={{
+      fontSize: "var(--text-xl)", fontWeight: 650, letterSpacing: "-0.02em",
+      lineHeight: 1.15, marginTop: 0, marginBottom: "var(--space-2)",
+    }}>
+      {children}
+    </h2>
+  );
 }
 
 export function P({ children }: { children: ReactNode }) {
-  return <p className="text-dim" style={{ fontSize: 15, marginBottom: "1.5rem" }}>{children}</p>;
+  return (
+    <p className="text-dim" style={{ fontSize: "var(--text-base)", marginBottom: "var(--space-6)" }}>
+      {children}
+    </p>
+  );
 }
 
 export function Card({ children, accent }: { children: ReactNode; accent?: boolean }) {
+  // `.cv-paper`, not the legacy `.card`: paper has to DETACH from the ground,
+  // and that is the elevation ladder's job, not a border's.
   return (
-    <div className="card" style={accent ? { borderColor: "var(--accent)" } : undefined}>
+    <div className="cv-paper" style={{
+      padding: "var(--space-5) var(--space-6)", marginBottom: "var(--space-4)",
+      ...(accent ? { borderColor: "color-mix(in srgb, var(--mind) 40%, transparent)" } : null),
+    }}>
       {children}
     </div>
   );
@@ -48,22 +75,26 @@ export function RadioGroup<T extends string>({ value, onChange, options }: {
             key={o.value}
             onClick={() => onChange(o.value)}
             type="button"
+            className="secondary"
             style={{
               textAlign: "left",
-              padding: "0.6rem 0.75rem",
-              fontSize: 13,
+              padding: "var(--space-3) var(--space-4)",
+              fontSize: "var(--text-sm)",
               cursor: "pointer",
-              border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
-              background: active ? "var(--surface-2)" : "transparent",
-              color: "var(--text)",
-              borderRadius: 6,
+              minHeight: 44,
+              // Selection is a STATE, so it wears the mind hue — the same
+              // treatment the canvas rail uses for an open lens.
+              borderColor: active ? "color-mix(in srgb, var(--mind) 40%, transparent)" : undefined,
+              background: active ? "color-mix(in srgb, var(--mind) 6%, transparent)" : undefined,
+              color: active ? "var(--mind)" : "var(--text)",
+              borderRadius: 10,
               display: "flex",
               flexDirection: "column",
-              gap: "0.25rem",
+              gap: "var(--space-1)",
             }}
           >
             <span style={{ fontWeight: 600 }}>{o.label}</span>
-            {o.description && <span className="text-dim" style={{ fontSize: 11 }}>{o.description}</span>}
+            {o.description && <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>{o.description}</span>}
           </button>
         );
       })}
@@ -88,17 +119,21 @@ export function ChipMultiSelect<T extends string>({ values, onChange, options }:
             key={o.value}
             onClick={() => toggle(o.value)}
             type="button"
+            className="secondary"
+            aria-pressed={active}
             style={{
-              padding: "0.4rem 0.7rem",
-              fontSize: 12,
-              borderRadius: 999,
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "var(--space-2) var(--space-4)",
+              fontSize: "var(--text-xs)",
+              borderRadius: 9, minHeight: 32,
               cursor: "pointer",
-              border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
-              background: active ? "var(--surface-2)" : "transparent",
-              color: "var(--text)",
+              borderColor: active ? "color-mix(in srgb, var(--mind) 40%, transparent)" : undefined,
+              background: active ? "color-mix(in srgb, var(--mind) 6%, transparent)" : undefined,
+              color: active ? "var(--mind)" : "var(--text)",
             }}
           >
-            {active ? "✓ " : ""}{o.label}
+            {active && <Ic name="check" size={12} color="var(--mind)" />}
+            {o.label}
           </button>
         );
       })}
@@ -136,10 +171,11 @@ export function ChipInput({
       style={{
         display: "flex", flexWrap: "wrap", gap: "0.35rem",
         padding: "0.4rem 0.5rem",
-        background: "var(--bg)",
-        border: "1px solid var(--border)",
-        borderRadius: 6,
-        minHeight: 36,
+        // Matches the canvas input material: paper fill, hairline edge.
+        background: "var(--panel)",
+        border: "1px solid rgba(0, 0, 0, 0.10)",
+        borderRadius: 10,
+        minHeight: 44,
       }}
       onClick={(e) => {
         const tgt = e.currentTarget.querySelector("input");
@@ -152,10 +188,10 @@ export function ChipInput({
           style={{
             display: "inline-flex", alignItems: "center", gap: "0.25rem",
             padding: "0.15rem 0.5rem",
-            background: "color-mix(in srgb, var(--accent) 14%, transparent)",
-            color: "var(--accent)",
-            border: "1px solid color-mix(in srgb, var(--accent) 35%, transparent)",
-            borderRadius: 999, fontSize: 11, fontWeight: 600,
+            background: "color-mix(in srgb, var(--mind) 8%, transparent)",
+            color: "var(--mind)",
+            border: "1px solid color-mix(in srgb, var(--mind) 30%, transparent)",
+            borderRadius: 9, fontSize: "var(--text-xs)", fontWeight: 600,
           }}
         >
           {v}
@@ -164,8 +200,9 @@ export function ChipInput({
             onClick={(e) => { e.stopPropagation(); remove(i); }}
             aria-label={`Remove ${v}`}
             style={{
-              background: "transparent", border: "none", color: "var(--accent)",
+              background: "transparent", border: "none", color: "var(--mind)",
               cursor: "pointer", padding: 0, marginLeft: 2, fontSize: 13, lineHeight: 1,
+              boxShadow: "none",
             }}
           >×</button>
         </span>

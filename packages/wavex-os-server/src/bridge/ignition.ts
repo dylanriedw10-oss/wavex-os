@@ -23,6 +23,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import type { CompanyManifest } from "@wavex-os/plugin-onboarding";
 import { getOnboardingDir, getInstanceDir } from "../state-bridge.js";
+import { readGoal, goalProvenance, kpiLabel, UNSTATED } from "../lib/goal-line.js";
 
 // Base URL Paperclip is reachable at. Seeded from the process env, but
 // ignite() overrides it per-run from the handoff arg — the env read is
@@ -64,9 +65,17 @@ export interface IgnitionResult {
 
 interface WorkflowManifest {
   agent_workflows?: Record<string, {
+    /** Mirrors `WorkflowTask` in vendor/wavex-os/onboarding/src/schema/
+     *  workflow-manifest.ts:17. This shape used to declare `title` and
+     *  `description` — two fields that have never existed on a workflow task
+     *  — so the seeded issue took its title AND its entire body from
+     *  `undefined`, and every seeded Paperclip issue shipped with an empty
+     *  description above the contract block. (`target` is real; it stayed.) */
     on_fire?: Array<{
-      title?: string;
-      description?: string;
+      task?: string;
+      tier?: string;
+      connector?: string | null;
+      input?: string;
       expected_output?: string;
       flow_type?: string;
       target?: string;
@@ -292,16 +301,21 @@ export async function ignite(
       const paperclipAgentId = slotToPaperclipId.get(slot);
       if (!paperclipAgentId) continue;
 
-      const title = `${(firstNonGated.expected_output ?? firstNonGated.title ?? "Initial cycle").slice(0, 80)}`;
+      // `.task` — NOT `.title`. WorkflowTask is {task, tier, connector, flow_type,
+      // input, expected_output, dry_run_gate} (schema/workflow-manifest.ts:17).
+      // `.title` has never existed, so the fallback was permanently undefined
+      // and a task with no expected_output seeded an issue literally called
+      // "Initial cycle" instead of the work it describes.
+      const title = `${(firstNonGated.expected_output ?? firstNonGated.task ?? "Initial cycle").slice(0, 80)}`;
       // OPERATIONAL_LAYER.md §1 — the deliverable contract. The Liaison's
       // DELIVERABLE_LEDGER skill parses this fenced block back out to seed a
       // wavex_os.deliverable_ledger row (plan_ref + expected_response + kind).
       const body = [
-        firstNonGated.description ?? "",
+        firstNonGated.task ?? "",
         "",
         "```wavex-contract",
         `plan_ref: workflow:${slot}:on_fire`,
-        `expected_response: ${(firstNonGated.expected_output ?? firstNonGated.title ?? "complete the seeded cycle").replace(/\r?\n/g, " ").slice(0, 280)}`,
+        `expected_response: ${(firstNonGated.expected_output ?? firstNonGated.task ?? "complete the seeded cycle").replace(/\r?\n/g, " ").slice(0, 280)}`,
         "kind: routine",
         "```",
         "",
@@ -417,9 +431,22 @@ export async function ignite(
   // work, and the roster, and tells them to convert the manifest into an
   // executable task roadmap. Without this run the fleet is "orphan from
   // planning": agents wake with nothing concrete to drive and just chatter.
-  const g = (manifest as { goal?: { kpiId?: string; current?: number; target?: number; days?: number } }).goal;
-  const goalLine = g?.kpiId
-    ? `GOAL: move ${g.kpiId} from ${g.current ?? "?"} to ${g.target ?? "?"} within ${g.days ?? "?"} days.`
+  //
+  // The goal is read through `lib/goal-line.ts`, and the `stated` bit rides
+  // with it. That matters more here than anywhere else in the product: this
+  // brief opens "the most important run this company will ever have", and a
+  // stage band the operator never chose used to arrive inside it as a flat
+  // imperative. The fleet would then derive every workstream from a number
+  // nobody picked, and the loop's own benchmark would be that number.
+  //
+  // Three states, not two. A goal that is absent and a goal that is invented
+  // are different problems and get different instructions.
+  const g = readGoal(manifest);
+  const provenance = g ? goalProvenance(g) : null;
+  const goalLine = g
+    ? provenance === "stated"
+      ? `GOAL: move ${kpiLabel(g.kpiId)} from ${g.current.toLocaleString()} to ${g.target.toLocaleString()} within ${g.days} days.`
+      : `GOAL (PROVISIONAL): move ${kpiLabel(g.kpiId)} from ${g.current.toLocaleString()} to ${g.target.toLocaleString()} within ${g.days} days.\n${provenance === "fallback" ? UNSTATED.directive : `This target has NO RECORD of who chose it — it may be a stage-band estimate rather than the operator's decision. Confirming or replacing it with the operator is step 0 of this run, before any workstream is derived from it.`}`
     : `GOAL: not set in the manifest — derive it from the company context and confirm it.`;
   const kickoffBrief = [
     `INCEPTION KICKOFF — your fleet just went live. You are the Kernel (CEO + Chief of Staff). This is your FOUNDING PLANNING RUN — the most important run this company will ever have.`,

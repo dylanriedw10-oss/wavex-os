@@ -124,6 +124,24 @@ export const COMMIT_ALLOWLIST = {
     path: "/api/instance/:companyId/ignite",
     body: z.object({}).strict(),
   },
+  /* Build Your Organization's ONE Confirm: activate + native seed + plan
+   * lock, as a single gated transaction. The sha is the staleness gate —
+   * the operator must approve the organization that is actually on disk. */
+  "approve-organization": {
+    method: "POST" as const,
+    path: "/api/instance/:companyId/approve-organization",
+    body: z.object({
+      manifestSha256: z.string().regex(/^sha256:[0-9a-f]{64}$/),
+      path: z.enum(["mvp_build", "adopted_product"]),
+    }).strict(),
+  },
+  /* Path B's confirm gate: an operator-pasted URL means an outbound fetch
+   * plus a T2 spend — exactly what proposal → confirm exists for. */
+  "adopt-product": {
+    method: "POST" as const,
+    path: "/api/instance/:companyId/adopt-product",
+    body: z.object({ url: z.string().min(4).max(2048), orgName: z.string().min(1).max(120).optional() }).strict(),
+  },
   "add-agent": {
     method: "POST" as const,
     path: "/api/instance/:companyId/add-agent",

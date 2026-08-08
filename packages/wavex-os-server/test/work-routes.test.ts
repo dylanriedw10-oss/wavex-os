@@ -23,7 +23,11 @@ const MANIFEST = {
     pillar_3: { stage: "10k_100k_mrr" },
     pillar_4: { sales_motion: "assisted_demo", lead_sources: ["outbound_cold"] },
   },
-  goal: { metric: "mrr", current: 12_000, target: 100_000, days: 90 },
+  // `kpiId` with the CANONICAL long id — the manifest goal has never carried
+  // a `metric` field, and `mrr` is a short alias normalised away before it
+  // gets here. This fixture said `metric: "mrr"`, which is why the dropped-
+  // KPI-name bug was invisible to the suite.
+  goal: { kpiId: "monthly_recurring_revenue", current: 12_000, target: 100_000, days: 90, stated: true },
   connector_manifest: { required: [], suggested: [], deferred: [], blocked_on_manual_approval: [] },
   swarm_manifest: {
     agents: {
@@ -105,7 +109,7 @@ describe("seed → cycle → review — the whole loop", () => {
     expect(again.already).toBe(true);
 
     const w = (await app.inject({ method: "GET", url: WORK })).json();
-    expect(w.goals[0].title).toMatch(/mrr: 12,000 → 100,000/);
+    expect(w.goals[0].title).toMatch(/monthly recurring revenue: 12,000 → 100,000/);
     expect(w.goals[0].source).toBe("manifest");
     expect(w.tasks.map((t: { assigneeSlot: string }) => t.assigneeSlot).sort()).toEqual(["ceo", "growth"]);
   });

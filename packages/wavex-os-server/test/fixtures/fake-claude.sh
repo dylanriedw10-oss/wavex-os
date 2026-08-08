@@ -1,7 +1,8 @@
 #!/bin/sh
 # Fixture engine for tests + harness. Mimics `claude -p <prompt>
 # [--output-format json]` closely enough for the tier-router spawn.
-# Modes via FAKE_CLAUDE_MODE: ok (default) | fail | short.
+# Modes via FAKE_CLAUDE_MODE: ok (default) | fail | short | research |
+#   research_garbage.  The two research modes only affect --output-format json.
 # FAKE_CLAUDE_SLEEP=<seconds> delays the reply so mid-cycle "running"
 # states are observable (screenshot harness); unset = instant.
 set -eu
@@ -36,9 +37,31 @@ marks the task done, requesting changes requeues it with feedback."
 fi
 
 if [ "$JSON" = "1" ]; then
+  # The research modes ride the same envelope: the tier-router reads
+  # `.result`, so the research JSON is a STRING inside it, exactly as a real
+  # model's stdout would be.
+  if [ "$MODE" = "research" ]; then
+    # One finding with an insert whose anchor + slot are real, and one
+    # advisory finding — enough to exercise apply, provenance, and the
+    # "most findings attach nothing" case.
+    #
+    # `assignee_slot` must be a slot the SELECTOR leaves active for this
+    # test's pillars, not merely a slot that exists. Research may not assign
+    # work to an agent the matrix parked, and the prompt hands the model the
+    # active set for exactly that reason. This named `cpo.build`, which was
+    # only ever active because a "full org" override promoted every parked
+    # agent — the override the audit found was cancelling the activation
+    # verdict the pillar answers had just produced.
+    printf '{"result": "{\\"findings\\":[{\\"id\\":\\"usage-metering\\",\\"headline\\":\\"Meter consumption before pricing the tiers\\",\\"claim\\":\\"Usage data makes the pricing decision instead of guessing it.\\",\\"rationale\\":\\"Stripe is already wired, so metering is a small addition rather than a project.\\",\\"signals\\":[\\"pillar_1.industry_hint\\"],\\"confidence\\":\\"high\\"},{\\"id\\":\\"changelog-inbound\\",\\"headline\\":\\"Publish a changelog as an inbound surface\\",\\"claim\\":\\"Shipping cadence becomes demand generation.\\",\\"rationale\\":\\"Pre-revenue teams have cadence but no distribution.\\",\\"signals\\":[],\\"confidence\\":\\"medium\\"}],\\"attachments\\":[{\\"finding_id\\":\\"usage-metering\\",\\"kind\\":\\"mvp_step_insert\\",\\"after\\":\\"mvp-spec\\",\\"title\\":\\"Wire usage metering\\",\\"deliverable\\":\\"Consumption events flowing with a per-account rollup\\",\\"assignee_slot\\":\\"cpo.roadmap\\"}]}", "total_cost_usd": 0, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}}\n'
+  elif [ "$MODE" = "research_garbage" ]; then
+    # A model that answered in prose. Must degrade to zero findings, NOT to
+    # a failed run.
+    printf '{"result": "I considered several angles but nothing stood out.", "total_cost_usd": 0, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}}\n'
+  else
   # tier-router JSON envelope with zero usage — the canvas T2 path
   # degrades to the stub exactly as with no engine.
   printf '{"result": "fixture engine json mode — canned", "total_cost_usd": 0, "usage": {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}}\n'
+  fi
 else
   printf '%s\n' "$OUT"
 fi

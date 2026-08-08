@@ -6,7 +6,7 @@
  *  empty state: greeting, pulse, attention, composer — nothing else until
  *  asked. The workspace only ever grows in response to a user act. */
 
-import { Component, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { wavexOsOnboardingApi, ApiError } from "../wavex-os/lib/api";
@@ -15,6 +15,8 @@ import { Cell, ProposalCard, fmtLocalTs } from "./cells";
 import { Ic } from "./icons";
 import { OrgView, capIcon } from "./OrgFlywheel";
 import { RuntimeTray } from "./RuntimeTray";
+import { CELL_PX, InstrumentHeight, WORKSPACE_CHROME_PX, fitRows, useMeasuredHeight } from "./layout";
+import { useCellChoreography } from "./useCellChoreography";
 import type { CanvasProposal, CanvasTurn, CellSpec, LayoutSpec, OrgWalkStep, SinceSnapshot } from "./contract";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -106,15 +108,13 @@ export default function CanvasPage() {
   // Thinking has geography: the stack keeps insertion order, deduped by
   // signature, capped at 4. Pins remain the durable layer.
   const [board, setBoard] = useState<Array<{ layout: LayoutSpec; signature?: string }>>([]);
-  // FLIP (morph, never replace): rects captured per cell id BEFORE the swap;
-  // after the new layout lays out, a surviving id animates from its old
-  // position to its new one — the object visibly travels, not reappears.
-  const cellRefs = useRef<Map<string, HTMLElement>>(new Map());
-  const prevRects = useRef<Map<string, DOMRect>>(new Map());
+  // Cognition choreography (extracted to useCellChoreography so the build
+  // surface shares the grammar): appear / morph / dissolve / FLIP. Rects are
+  // captured in focusLayout, BEFORE the swap commits.
+  const { cellPhase, dissolving, registerCellRef, captureRects } =
+    useCellChoreography(activeLayout?.layout.cells ?? [], activeLayout);
   function focusLayout(next: { layout: LayoutSpec; signature?: string; fresh?: boolean; since?: SinceSnapshot }) {
-    prevRects.current = new Map(
-      [...cellRefs.current.entries()].map(([id, el]) => [id, el.getBoundingClientRect()]),
-    );
+    captureRects();
     if (next.fresh) glowSeq.current += 1;
     setActiveLayout((cur) => {
       if (cur && cur.signature !== next.signature) {
@@ -125,63 +125,18 @@ export default function CanvasPage() {
       return next;
     });
   }
-  // Cognition choreography: animation communicates thinking, not interface.
-  // Diff prior vs new layout — added cells APPEAR (discovered, staggered),
-  // changed cells MORPH (evidence shifted), removed cells DISSOLVE (rejected).
-  const prevCellsRef = useRef<Map<string, string>>(new Map());
-  const [cellPhase, setCellPhase] = useState<Record<string, "appear" | "morph" | "">>({});
-  const [dissolving, setDissolving] = useState<CellSpec[]>([]);
-  useLayoutEffect(() => {
-    const cells = activeLayout?.layout.cells ?? [];
-    const prev = prevCellsRef.current;
-    const next = new Map(cells.map((c) => [c.id, JSON.stringify(c)]));
-    const phases: Record<string, "appear" | "morph" | ""> = {};
-    for (const c of cells) {
-      const was = prev.get(c.id);
-      phases[c.id] = was === undefined ? "appear" : was !== next.get(c.id) ? "morph" : "";
-    }
-    const gone: CellSpec[] = [];
-    if (activeLayout) {
-      for (const [id] of prev) {
-        if (!next.has(id)) {
-          const spec = dissolveSpecs.current.get(id);
-          if (spec) gone.push(spec);
-        }
-      }
-    }
-    setCellPhase(phases);
-    // FLIP: a cell id that survived the swap travels from its old rect to
-    // its new one. Translate only — content reflow owns the size change.
-    if (!REDUCE) {
-      for (const [id, was] of prevRects.current) {
-        const el = cellRefs.current.get(id);
-        if (!el || !next.has(id)) continue;
-        const now = el.getBoundingClientRect();
-        const dx = was.left - now.left;
-        const dy = was.top - now.top;
-        if (Math.abs(dx) + Math.abs(dy) < 6) continue;
-        el.style.transition = "none";
-        el.style.transform = `translate(${dx}px, ${dy}px)`;
-        requestAnimationFrame(() => {
-          el.style.transition = "transform 380ms var(--ease)";
-          el.style.transform = "";
-          setTimeout(() => { el.style.transition = ""; }, 420);
-        });
-      }
-    }
-    prevRects.current.clear();
-    if (gone.length && !REDUCE) {
-      setDissolving(gone);
-      const t = setTimeout(() => setDissolving([]), 300);
-      prevCellsRef.current = next;
-      dissolveSpecs.current = new Map(cells.map((c) => [c.id, c]));
-      return () => clearTimeout(t);
-    }
-    prevCellsRef.current = next;
-    dissolveSpecs.current = new Map(cells.map((c) => [c.id, c]));
-  }, [activeLayout]); // eslint-disable-line react-hooks/exhaustive-deps
-  const dissolveSpecs = useRef<Map<string, CellSpec>>(new Map());
   const scrollRef = useRef<HTMLDivElement>(null);
+  // The fit law's single measurement (spec Rev 10): one observer on the
+  // instrument zone, published through context. Every clamped list in the
+  // tree derives its row count from this one number.
+  const [instrumentRef, instrumentH] = useMeasuredHeight();
+  // The composed grid's budget: cells are ~2 per row at typical widths, and
+  // a cell costs roughly CELL_PX of column height. Beyond the fit the count
+  // prints — a composed thought is never dropped in silence.
+  const allCells = activeLayout?.layout.cells ?? [];
+  const cellRows = fitRows(instrumentH, CELL_PX, { min: 2, reservedPx: WORKSPACE_CHROME_PX });
+  const visibleCells = allCells.slice(0, cellRows * 2);
+  const hiddenCells = allCells.length - visibleCells.length;
 
   // The Organizational OS law (docs/RECURSIVE_ORG_SPEC.md Rev 5): the org is
   // the workspace pane's RESTING state. No toggle — the pane derives from one
@@ -299,7 +254,8 @@ export default function CanvasPage() {
     queryKey: ["org-node", companyId, orgNodeId],
     queryFn: () => wavexOsOnboardingApi.getOrgNode(companyId!, orgNodeId),
   });
-  const capSuggestions = (nodeCapsQ.data?.capabilities ?? []).filter((c) => c.id !== "c-grav").slice(0, 4);
+  // capSuggestions is derived below, after the work read — c-adopt's
+  // visibility depends on whether the runtime is seeded.
 
   // The Runtime tray (spec Rev 9): the one sanctioned overlay. Its read
   // shares the org-work cache; polling tightens while the tray is open
@@ -313,6 +269,11 @@ export default function CanvasPage() {
     refetchInterval: trayOpen ? 5_000 : 30_000,
   });
   const trayWork = trayQ.data ?? null;
+  // Chips: c-grav is a lens, not a question; c-adopt only exists before the
+  // runtime is seeded (an operating company has nothing left to adopt).
+  const capSuggestions = (nodeCapsQ.data?.capabilities ?? [])
+    .filter((c) => c.id !== "c-grav" && (trayWork === null || c.id !== "c-adopt"))
+    .slice(0, 4);
   const anyRunning = (trayWork?.tasks ?? []).some((t) => t.status === "in_progress");
   const trayNeedsYou = trayWork
     ? trayWork.deliverables.filter((d) => d.review === "pending_review").length
@@ -409,7 +370,7 @@ export default function CanvasPage() {
 
   if (!companyId) {
     return (
-      <div className="canvas-root" style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: "var(--space-6)" }}>
+      <div className="canvas-root" style={{ height: "100dvh", display: "grid", placeItems: "center", padding: "var(--space-6)" }}>
         <div className="card" style={{ maxWidth: 460 }}>
           <strong>No company selected.</strong>{" "}
           <span className="text-dim">The canvas needs a company. Pick one from <Link to="/">Mission Control</Link> or <Link to="/onboarding">run onboarding</Link>.</span>
@@ -428,7 +389,13 @@ export default function CanvasPage() {
 
   return (
     <CanvasBoundary>
-      <div className="canvas-root" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      <InstrumentHeight.Provider value={instrumentH}>
+      {/* The fit law (spec Rev 10): the shell is LOCKED to the window. A
+          minHeight here lets the column grow past the viewport, which makes
+          every descendant's overflow inert and pushes the scroll onto the
+          document — the zones stop being fixed and the masthead scrolls away.
+          dvh, not vh: vh ignores mobile's collapsing URL bar. */}
+      <div className="canvas-root cv-shell" style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <Pulse companyId={companyId} />
         <header className="cv-glass" style={{ display: "flex", alignItems: "baseline", gap: "var(--space-3)", padding: "var(--space-3) var(--space-6)", borderLeft: "none", borderRight: "none", borderTop: "none", borderRadius: 0 }}>
           <span style={{ fontWeight: 700, letterSpacing: "-.01em" }}>WaveX <span style={{ color: "var(--text-dim)", fontWeight: 500 }}>Canvas</span></span>
@@ -457,7 +424,7 @@ export default function CanvasPage() {
           <Link to={`/?companyId=${encodeURIComponent(companyId)}`} style={{ fontSize: "var(--text-xs)" }}>Mission Control</Link>
         </header>
         {showLedger && (
-          <div className="cv-glass" style={{ borderLeft: "none", borderRight: "none", borderTop: "none", borderRadius: 0, padding: "var(--space-3) var(--space-6)", maxHeight: "32vh", overflowY: "auto" }}>
+          <div className="cv-glass cv-record" style={{ borderLeft: "none", borderRight: "none", borderTop: "none", borderRadius: 0, padding: "var(--space-3) var(--space-6)", maxHeight: "32vh", overflowY: "auto" }}>
             {/* The ledger: commitments, never trimmed. Chronological by design. */}
             {ledger.map((e) => (
               <div key={`${e.proposalId}-${e.ts_iso}`} style={{ display: "flex", gap: "var(--space-3)", alignItems: "baseline", padding: "4px 0", fontSize: "var(--text-sm)", borderLeft: `3px solid ${e.status === "committed" ? "var(--success)" : "var(--danger)"}`, paddingLeft: "var(--space-3)", marginBottom: 4 }}>
@@ -473,7 +440,11 @@ export default function CanvasPage() {
           {/* conversation — the permanent pane. It wears the deeper surface
               so the two panes read as different materials, not one sheet. */}
           <section style={{ display: "flex", flexDirection: "column", borderRight: "1px solid var(--border)", minHeight: 0, background: "color-mix(in srgb, var(--panel-2) 55%, var(--void))" }}>
-            <div ref={scrollRef} role="log" aria-live="polite" aria-relevant="additions"
+            {/* NAMED EXCEPTION 1 of 2 (spec Rev 10): the transcript scrolls.
+                Conversation is append-only and §4 makes it "the substrate and
+                the record" — clamping turns behind a descend would hide the
+                record itself. The composer below stays pinned. */}
+            <div ref={scrollRef} role="log" aria-live="polite" aria-relevant="additions" className="cv-thread"
               style={{ flex: 1, overflowY: "auto", padding: "var(--space-4)", display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
               {q.isLoading && (
                 <span className="text-dim" style={{ margin: "auto", fontSize: "var(--text-sm)" }}>loading…</span>
@@ -538,6 +509,10 @@ export default function CanvasPage() {
                 {capSuggestions.map((cap) => (
                   <button key={cap.id}
                     onClick={() => {
+                      // c-adopt is a MUTATION path: it goes through the canvas
+                      // composer (which mints the adopt-product proposal for
+                      // the confirm gate), never through a read-only walk.
+                      if (cap.id === "c-adopt") { void send(cap.prompt); return; }
                       if (orgNodeId !== "company") setOrgScope({ nodeId: orgNodeId, title: labelFor(orgNodeId) });
                       void orgAsk(orgNodeId, cap.prompt);
                     }}
@@ -582,9 +557,13 @@ export default function CanvasPage() {
             </form>
           </section>
 
-          {/* workspace — the org at rest, ephemeral compositions on top */}
-          <section style={{ overflowY: "auto", padding: "var(--space-4) var(--space-6)", minHeight: 0 }}>
-            <>
+          {/* workspace — the org at rest, ephemeral compositions on top.
+              The fit law's zone contract: this section never scrolls. The
+              INSTRUMENT flexes and is the measured budget every clamped list
+              derives from; the SHELF is pinned below it and never yields. */}
+          <section
+            style={{ display: "flex", flexDirection: "column", padding: "var(--space-4) var(--space-6)", minHeight: 0, overflow: "hidden" }}>
+            <div ref={instrumentRef} className="cv-instrument" style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
             {activeLayout ? (
               <div style={{ position: "relative" }}>
                 {/* Fresh thinking is illuminated: a violet atmosphere that
@@ -628,10 +607,13 @@ export default function CanvasPage() {
                     ✗ couldn't keep: {keepState.error}
                   </div>
                 )}
+                {/* Rev 10: the composed grid is budgeted too. Cells beyond
+                    what fits are counted, not silently cut — Minimize sends
+                    the whole workspace to the shelf if you need the room. */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "var(--space-3)" }}>
-                  {activeLayout.layout.cells.map((cell, i) => (
+                  {visibleCells.map((cell, i) => (
                     <div key={cell.id}
-                      ref={(el) => { if (el) cellRefs.current.set(cell.id, el); else cellRefs.current.delete(cell.id); }}
+                      ref={registerCellRef(cell.id)}
                       style={{
                       gridColumn: cell.span === 2 ? "1 / -1" : undefined,
                       animation: cellPhase[cell.id] === "appear"
@@ -651,6 +633,11 @@ export default function CanvasPage() {
                     </div>
                   ))}
                 </div>
+                {hiddenCells > 0 && (
+                  <div className="text-dim" style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)" }}>
+                    +{hiddenCells} more thought{hiddenCells === 1 ? "" : "s"} in this workspace — ask to focus one
+                  </div>
+                )}
               </div>
             ) : (
               // HOME: the organization is the resting state — persistent
@@ -671,12 +658,14 @@ export default function CanvasPage() {
                 walk={walkView}
               />
             )}
+            </div>
 
             {/* The shelf (spec Rev 7): ephemeral things at rest sit LOW —
                 resting workspaces and pins never outrank the organization's
-                identity. One tap back, exactly as before. */}
+                identity. One tap back, exactly as before. Rev 10: it is a
+                PINNED zone — it never scrolls and never yields its space. */}
             {(board.length > 0 || desk.pinned.length > 0) && (
-              <div style={{ marginTop: "var(--space-6)", paddingTop: "var(--space-4)", borderTop: "1px solid rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+              <div style={{ flexShrink: 0, marginTop: "var(--space-4)", paddingTop: "var(--space-4)", borderTop: "1px solid rgba(0,0,0,0.06)", display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
                 {board.length > 0 && (
                   <div>
                     {/* The board: minimized thinking objects — receding, one
@@ -730,7 +719,6 @@ export default function CanvasPage() {
                 )}
               </div>
             )}
-            </>
           </section>
         </div>
 
@@ -738,6 +726,7 @@ export default function CanvasPage() {
            var cascade from there — fixed positioning doesn't need the body. */}
         <RuntimeTray open={trayOpen} onClose={() => setTrayOpen(false)} work={trayWork} walk={walkView} />
       </div>
+      </InstrumentHeight.Provider>
 
       <style>{`
         /* Nothing bounces, nothing scales: arrival and departure GLIDE.

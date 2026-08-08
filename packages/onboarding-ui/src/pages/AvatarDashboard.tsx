@@ -105,7 +105,7 @@ export function AvatarDashboard() {
         <div style={{ padding: "2rem", maxWidth: 720, margin: "0 auto" }}>
           <h2 style={{ marginTop: 0 }}>Couldn't load avatar</h2>
           <p style={{ color: "var(--warning)" }}>{error}</p>
-          <Link to="/onboarding-chat">← Back to onboarding</Link>
+          <Link to="/build">← Back to onboarding</Link>
         </div>
       </Shell>
     );
@@ -242,7 +242,7 @@ function OverviewTab({ avatar }: { avatar: Avatar }) {
           <SectionTitle>Connected tools ({avatar.tools.length})</SectionTitle>
           {avatar.tools.length === 0 && (
             <p className="text-dim" style={{ margin: 0, fontSize: 12 }}>
-              No tools connected yet. <Link to="/onboarding-chat">Wire some.</Link>
+              No tools connected yet. <Link to="/build">Wire some.</Link>
             </p>
           )}
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: 6 }}>

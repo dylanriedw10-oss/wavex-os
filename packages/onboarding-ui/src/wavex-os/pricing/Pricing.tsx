@@ -54,12 +54,21 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
     setError(null);
     try {
       await wavexOsOnboardingApi.subscribeTier({ orgId: companyId, tierId, origin });
-      onContinue(tierId, origin);
     } catch (e) {
+      // RECORD THE INTENT AND CONTINUE. `onContinue` is what mints and commits
+      // the APPROVAL — an act that has nothing to do with billing. Returning
+      // early here stranded a signed, finalized organization behind a paywall
+      // because a billing service was briefly unreachable, with no way
+      // forward. The operator's choice is kept for a retry; the organization
+      // is not held hostage to it.
       setError(e instanceof ApiError ? e.message : (e as Error).message);
+      try {
+        localStorage.setItem(`wavex-os-tier-intent:${companyId}`, JSON.stringify({ tierId, origin, at: new Date().toISOString() }));
+      } catch { /* best effort */ }
     } finally {
       setSubmitting(null);
     }
+    onContinue(tierId, origin);
   }
 
   if (q.isLoading) {
@@ -71,17 +80,19 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
 
   const tiers = q.data?.tiers ?? [];
 
+  // No `overflow: auto` and no `92vh`: the pane owns the height, and the fit
+  // law allows exactly two scrollers in the product — neither is this. The
+  // bottom padding that used to reserve room for a viewport-FIXED skip footer
+  // is gone too; the footer sits in normal flow now (see below).
   const containerStyle = dialogMode
     ? {
         maxWidth: 1100,
         width: "min(1100px, 95vw)",
-        maxHeight: "92vh",
         margin: 0,
-        padding: "1.5rem 1.5rem 5rem",
+        padding: "1.5rem",
         background: "var(--surface)",
         border: "1px solid var(--border)",
         borderRadius: 12,
-        overflow: "auto" as const,
       }
     : { maxWidth: 1400, margin: "0 auto", padding: "2rem", paddingBottom: "6rem" };
 
@@ -115,10 +126,16 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
         </div>
       )}
 
-      {/* Sticky footer with Skip button + secondary nav.
-          Matches the rest of the wizard's sticky-footer pattern from
-          Materialize so the operator always has a path forward. */}
-      <div style={{
+      {/* The skip footer. In the legacy full-page wizard it is viewport-FIXED,
+          which is why the dialog had to reserve 5rem of bottom padding for a
+          bar it did not contain. Inside a pane that is simply wrong — the bar
+          would float over whatever else the phase renders — so in dialogMode
+          it sits in normal flow at the end of the card. */}
+      <div style={dialogMode ? {
+        marginTop: "1rem",
+        borderTop: "1px solid var(--border)",
+        paddingTop: "0.75rem",
+      } : {
         position: "fixed", bottom: 0, left: 0, right: 0,
         background: "color-mix(in srgb, var(--surface) 92%, transparent)",
         borderTop: "1px solid var(--border)",
@@ -148,13 +165,18 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
 
   if (!dialogMode) return inner;
 
+  // `dialogMode` is a misnomer kept for its callers: this is NOT a dialog.
+  // A fixed-inset overlay over a dimmed backdrop is a modal, and interaction
+  // rule 5 bans modals outright — rule 2 permits exactly one overlay in the
+  // product, the Runtime tray, and this is not it. It also introduced a THIRD
+  // scroller, which the fit law permits only for `.cv-thread` and
+  // `.cv-record`. It escaped the quality gate's greps only because they are
+  // scoped to src/canvas/.
+  //
+  // So it renders as ordinary content in the pane it was given, and scrolls
+  // nowhere: the caller owns the height, exactly like every other phase.
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 80,
-      background: "color-mix(in srgb, #000 60%, transparent)",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      padding: "1.5rem",
-    }}>
+    <div style={{ height: "100%", minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
       {inner}
     </div>
   );

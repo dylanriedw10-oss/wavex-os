@@ -78,17 +78,18 @@
 
   /* ---- display step for mastheads (one confident title per screen) ---- */
   --text-2xl: 32px;
-}
 
-/* The canvas surface flips to the light architectural language by remapping
- * the token names its components already consume. The wizard and Mission
- * Control never see these overrides. */
-.canvas-root {
-  /* Re-resolve the inherited text color HERE: body sets `color: var(--text)`
-   * against the global theme, and descendants inherit that resolved value —
-   * without this line, anything that doesn't set its own color renders in
-   * the outer theme's ink. */
-  color: var(--ink);
+  /* ==== THE INVERSION ====================================================
+   * Light is the PRODUCT DEFAULT, not a canvas-local override. These lines
+   * remap the legacy token names onto the architectural primitives above,
+   * so every surface that already consumes `--bg`/`--surface`/`--text`
+   * (903 references across onboarding alone) moves without being touched.
+   *
+   * Declared last so they win inside this same rule; the dark values stay
+   * above as the single source `.legacy-dark` copies from.
+   *
+   * Surfaces that have NOT been redesigned yet opt out via `.legacy-dark`
+   * (Mission Control, the public pages) — see main.tsx. */
   --bg: var(--void);
   --surface: var(--panel);
   --surface-2: var(--panel-2);
@@ -106,6 +107,49 @@
   --brand-dim: #444444;
   --on-brand: #FDFDFB;
 }
+
+/* ==== THE OPT-OUT =======================================================
+ * Surfaces excluded from the standardization keep the original dark theme
+ * by re-declaring the legacy names locally. It only has to restore TOKENS:
+ * the material rules (.cv-*) and the control overrides were always scoped
+ * to .canvas-root, so they never reach here and nothing needs neutralizing.
+ *
+ * It also paints its own ground — `body` now resolves `--bg` to light, and
+ * without this the dark content would sit in a light frame. */
+.legacy-dark {
+  --bg: #0a0a0b;
+  --surface: #131315;
+  --surface-2: #1c1c1f;
+  --border: #2a2a2e;
+  --text: #ededef;
+  --text-dim: #9a9aa0;
+  --accent: #4ec9b0;
+  --accent-dim: #3a9484;
+  --warning: #f0b070;
+  --danger: #e06070;
+  --brand: #4ec9b0;
+  --brand-dim: #3a9484;
+  --on-brand: #08221d;
+  --success: #3fb98f;
+
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+/* `.canvas-root` no longer carries the token remap — that moved to `:root`
+ * when light became the product default. What it still owns is the MATERIAL
+ * and CONTROL layer below (.cv-*, buttons, inputs, focus, scrollbars), which
+ * is deliberately opt-in: a surface gets the architectural language by
+ * wearing this class.
+ *
+ * It is worn by BOTH the canvas and the onboarding shell, which is what
+ * makes the two read as reflections of each other. The name is historical —
+ * renaming it would churn ~25 selectors, the QUALITY_GATE greps and
+ * no-scroll.spec.ts for a cosmetic gain. */
+.canvas-root {
+  color: var(--ink);
+}
 /* Interaction is neutral: one quiet ink fill for the primary action,
  * hairlines for everything else. Color never means "clickable" here —
  * it means state. */
@@ -120,6 +164,19 @@
 .canvas-root button:active { transform: translateY(0.5px); }
 .canvas-root button.secondary { background: transparent; color: var(--ink); border: 1px solid rgba(0, 0, 0, 0.12); }
 .canvas-root button.secondary:hover { background: rgba(0, 0, 0, 0.035); }
+/* A PAPER SURFACE IS NEVER A PRIMARY CONTROL.
+ * When a whole card is the click target it is written as a <button>, and the
+ * ink fill above would repaint it — `.canvas-root button:hover` (0,2,1) also
+ * outranks `.cv-paper` (0,2,0), so the card stayed white at rest and turned
+ * near-black on hover. Paper stays paper; `.cv-lift` carries the hover, which
+ * is a lift, never a recolor. */
+.canvas-root button.cv-paper,
+.canvas-root button.cv-paper:hover {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: var(--elev-1);
+}
+.canvas-root button.cv-paper.cv-lift:hover { box-shadow: var(--elev-1-up); }
 /* Focus wears the mind hue — visible on ground and paper alike, and it's
  * the one place the intelligence color touches chrome. */
 .canvas-root :focus-visible {
@@ -179,6 +236,20 @@
   backdrop-filter: blur(12px) saturate(1.15);
   border-color: color-mix(in srgb, var(--mind) 14%, rgba(0, 0, 0, 0.08));
   box-shadow: var(--elev-2);
+}
+
+/* ---- the record: the fit law's second named scroll exception ----
+ * Rev 10 permits exactly two scrollers inside `.canvas-root`: `.cv-thread`
+ * (the conversation transcript) and `.cv-record` (a verbatim deliverable
+ * read in full). Everything else clamps against a measured budget and
+ * descends a level.
+ *
+ * A record is what a clamp DESCENDS INTO — so it must hold the complete
+ * list. That is precisely why it is allowed to scroll: the alternative is
+ * a clamp inside a clamp, which is how content gets silently lost. */
+.canvas-root .cv-record {
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* ---- the elevation ladder as classes (canvas scope) ----

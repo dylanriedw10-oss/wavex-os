@@ -48,6 +48,7 @@ What happens when the LLM call fails or returns malformed output.
 
 - [`pillar-1-enrichment.md`](./pillar-1-enrichment.md) — Pool A, infers 10 company-context fields from operator's raw input
 - [`pillar-2-claude-probe.md`](./pillar-2-claude-probe.md) — platform, verifies operator's Claude CLI + plan tier
+- [`plan-research.md`](./plan-research.md) — T2, discovers what is newly possible for this company before any plan exists (execution engine phase 1, prototyped in onboarding Phase 3)
 - [`swarm-roster-generation.md`](./swarm-roster-generation.md) — Pool A, picks the right C-Suite shape from 165 templates given the pillar answers
 - [`ignition-kickoff.md`](./ignition-kickoff.md) — platform, generates the CEO's first directive after activate
 - [`resource-sweep-report.md`](./resource-sweep-report.md) — platform, formats the 15min resource sweep snapshot into a Telegram-ready alert when threshold trips

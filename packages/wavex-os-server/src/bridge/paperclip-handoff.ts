@@ -29,6 +29,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import type { CompanyManifest } from "@wavex-os/plugin-onboarding";
 import { readInferenceAllocation } from "../routes/inference-allocation.js";
+import { readGoal, isStated, kpiLabel, UNSTATED } from "../lib/goal-line.js";
 
 interface SwarmAgentEntry {
   template_id?: string | null;
@@ -53,12 +54,15 @@ interface SwarmAgentEntry {
 function buildCompanyContextBlock(manifest: unknown): string {
   const m = manifest as {
     pillar_responses?: { pillar_1?: Record<string, unknown> };
-    goal?: { kpiId?: string; current?: number; target?: number; days?: number };
     meta_goal?: string;
     imprint_summary?: string;
   };
   const p1 = m.pillar_responses?.pillar_1 ?? {};
-  const goal = m.goal ?? {};
+  // CONTEXT.md is the most durable prompt material in the system — every
+  // agent reads it on every heartbeat for the life of the company. An
+  // unstated goal written here without its marker is not a one-off mistake;
+  // it is a permanent one.
+  const goal = readGoal(manifest);
   const lines: string[] = [
     "# Company Context",
     "",
@@ -80,10 +84,11 @@ function buildCompanyContextBlock(manifest: unknown): string {
     "",
     "## The goal the whole fleet is driving",
     "",
-    goal.kpiId
-      ? `**${goal.kpiId}**: ${goal.current ?? "?"} → ${goal.target ?? "?"} over ${goal.days ?? "?"} days`
+    goal
+      ? `**${kpiLabel(goal.kpiId)}**: ${goal.current.toLocaleString()} → ${goal.target.toLocaleString()} over ${goal.days} days`
       : "_No primary KPI set on the manifest._",
   ];
+  if (goal && !isStated(goal)) lines.push("", UNSTATED.context);
   if (m.meta_goal) {
     lines.push("", `**Meta goal:** ${m.meta_goal}`);
   }
@@ -100,13 +105,23 @@ function buildCompanyContextBlock(manifest: unknown): string {
  *  FIRST on_fire task was ever surfaced (as a single seed issue). The agent
  *  itself never saw its own workflow — it heartbeated blind. Now every wake
  *  the agent has its loop in front of it. */
-function buildAgentWorkflowMd(workflowManifest: unknown, slot: string): string | null {
+export function buildAgentWorkflowMd(workflowManifest: unknown, slot: string): string | null {
   const wm = workflowManifest as {
     agent_workflows?: Record<string, {
       heartbeat?: string;
       on_fire?: Array<{
         task?: string; tier?: string; flow_type?: string;
         input?: string; expected_output?: string;
+        /** The 14-day dry-run gate (workflow-manifest.ts). It is written by
+         *  the generator, honored by ignition (`tasks.find(t => !t.dry_run_gate)`)
+         *  — and used to be absent from THIS inline type, so the one file the
+         *  agent is told to "read top to bottom" every heartbeat rendered a
+         *  gated step identically to an ungated one. */
+        dry_run_gate?: boolean;
+        /** Which external system the step touches. Dropped for the same
+         *  reason, and it is what makes the gate legible: "create a charge"
+         *  and "create a charge in Stripe" are different instructions. */
+        connector?: string | null;
       }>;
       escalation?: Array<{ on?: string; to?: string }>;
     }>;
@@ -126,15 +141,31 @@ function buildAgentWorkflowMd(workflowManifest: unknown, slot: string): string |
 
   const onFire = aw.on_fire ?? [];
   if (onFire.length > 0) {
+    const gated = onFire.filter((s) => s.dry_run_gate).length;
+    if (gated > 0) {
+      lines.push(
+        `**${gated} of these ${onFire.length} steps ${gated === 1 ? "is" : "are"} under the dry-run gate** and ${gated === 1 ? "is" : "are"} marked 🔒 below. A gated step is a step you PREPARE, never one you execute — it produces a proposal for a human to release.`,
+        "",
+      );
+    }
     lines.push("## On every heartbeat, in order:", "");
     onFire.forEach((step, i) => {
-      const parts = [`${i + 1}. **${step.task ?? "(unnamed step)"}**`];
+      // The gate goes in the STEP TITLE, not the metadata parenthetical.
+      // Metadata is skimmable; a prefix is not. The step reads as an
+      // instruction, so anything qualifying the instruction has to sit where
+      // the instruction is.
+      const gate = step.dry_run_gate ? "🔒 GATED — " : "";
+      const parts = [`${i + 1}. ${gate}**${step.task ?? "(unnamed step)"}**`];
       const meta: string[] = [];
       if (step.tier) meta.push(`tier ${step.tier}`);
       if (step.flow_type) meta.push(step.flow_type);
+      if (step.connector) meta.push(`via ${step.connector}`);
       if (step.input) meta.push(`in: ${step.input}`);
       if (step.expected_output) meta.push(`out: ${step.expected_output}`);
       if (meta.length) parts.push(`   _(${meta.join(" · ")})_`);
+      if (step.dry_run_gate) {
+        parts.push("   _Do NOT execute this step for real. It is under the dry-run gate: produce the output as a proposal and stop. A human releases the gate._");
+      }
       lines.push(parts.join("\n"));
     });
     lines.push("");
@@ -349,14 +380,15 @@ async function buildCeoBundle(
   manifest: CompanyManifest,
   repoRoot: string,
 ): Promise<string> {
-  const m = manifest as unknown as {
-    goal?: { kpiId?: string; current?: number; target?: number; days?: number };
-  };
-  const goal = m.goal ?? {};
-  const kpiId = goal.kpiId ?? "primary_kpi";
-  const current = goal.current ?? "?";
-  const target = goal.target ?? "?";
-  const days = goal.days ?? 90;
+  const goal = readGoal(manifest);
+  const kpiId = goal ? kpiLabel(goal.kpiId) : "primary_kpi";
+  const current = goal ? goal.current.toLocaleString() : "?";
+  const target = goal ? goal.target.toLocaleString() : "?";
+  const days = goal?.days ?? 90;
+  // "Your one job" is a commitment. It cannot be one until somebody chose it,
+  // so an unstated goal is stated here as a proposal with a first move
+  // attached rather than as a mandate.
+  const provisional = goal !== null && !isStated(goal);
 
   const header = [
     "# CEO — Operating Contract",
@@ -367,8 +399,11 @@ async function buildCeoBundle(
     "",
     "## Your one job",
     "",
-    `> **Defend \`${kpiId}\` from ${current} to ${target} within ${days} days** of your go-live date.`,
+    provisional
+      ? `> **Proposed:** defend \`${kpiId}\` from ${current} to ${target} within ${days} days of your go-live date.`
+      : `> **Defend \`${kpiId}\` from ${current} to ${target} within ${days} days** of your go-live date.`,
     "",
+    ...(provisional ? [UNSTATED.context, ""] : []),
     "Everything else — queue grooming, hiring, firing, promoting operators —",
     "exists only to move that number. The current value, target, KPI tree,",
     "and SQL definitions live in `CONTEXT.md` (company overlay) and in the",
@@ -525,14 +560,15 @@ function applyManifestOverlay(
   manifest: CompanyManifest,
   companyContextBlock: string,
 ): string {
-  const m = manifest as unknown as {
-    goal?: { kpiId?: string; current?: number | string; target?: number | string; days?: number };
-  };
-  const g = m.goal ?? {};
-  const kpiId = g.kpiId ?? "primary_kpi";
-  const current = g.current ?? "?";
-  const target = g.target ?? "?";
-  const days = g.days ?? 90;
+  // Every non-CEO agent's operating contract opens with this line, and it
+  // is read on every heartbeat for the life of the company. Same rule as
+  // the CEO bundle: an unstated goal is a proposal, not a mandate.
+  const g = readGoal(manifest);
+  const kpiId = g ? kpiLabel(g.kpiId) : "primary_kpi";
+  const current = g ? g.current.toLocaleString() : "?";
+  const target = g ? g.target.toLocaleString() : "?";
+  const days = g?.days ?? 90;
+  const provisional = g !== null && !isStated(g);
 
   const companyMatch = companyContextBlock.match(/\*\*Company:\*\*\s*(.+?)\s*$/m);
   const company = companyMatch ? companyMatch[1].trim() : "this company";
@@ -560,7 +596,10 @@ function applyManifestOverlay(
     cleaned = typeof p === "string" ? cleaned.split(p).join("") : cleaned.replace(p, "");
   }
 
-  const header = `# ${roleTitle} — Operating Contract for ${company}\n\n**Goal:** defend \`${kpiId}\` from ${current} to ${target} within ${days} days.\n**Domain context, data plane, and KPI tree** live in \`CONTEXT.md\` — read it first, every heartbeat.\n\n---\n\n`;
+  const goalSentence = provisional
+    ? `**Goal (provisional):** defend \`${kpiId}\` from ${current} to ${target} within ${days} days. ${UNSTATED.short} — treat it as the working assumption, not a commitment.`
+    : `**Goal:** defend \`${kpiId}\` from ${current} to ${target} within ${days} days.`;
+  const header = `# ${roleTitle} — Operating Contract for ${company}\n\n${goalSentence}\n**Domain context, data plane, and KPI tree** live in \`CONTEXT.md\` — read it first, every heartbeat.\n\n---\n\n`;
   return header + cleaned;
 }
 

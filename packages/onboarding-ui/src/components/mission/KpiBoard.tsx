@@ -61,7 +61,7 @@ export function KpiBoard() {
         <p className="text-dim" style={{ margin: "0 0 12px" }}>
           No company selected. Select a company above to populate this scoreboard.
         </p>
-        <Link to="/onboarding-chat" style={{ display: "inline-block", padding: "12px 20px", background: "var(--accent)", color: "#08221d", borderRadius: "var(--radius)", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>Complete onboarding →</Link>
+        <Link to="/build" style={{ display: "inline-block", padding: "12px 20px", background: "var(--accent)", color: "#08221d", borderRadius: "var(--radius)", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>Complete onboarding →</Link>
       </div>
     );
   }
@@ -75,7 +75,7 @@ export function KpiBoard() {
       <div className="card">
         <h3 style={{ marginTop: 0 }}>KPI scoreboard</h3>
         <p className="text-dim" style={{ margin: 0 }}>
-          No manifest yet for <code>{companyId}</code>. <Link to="/onboarding-chat">Run onboarding to finalize</Link>.
+          No manifest yet for <code>{companyId}</code>. <Link to="/build">Run onboarding to finalize</Link>.
         </p>
       </div>
     );

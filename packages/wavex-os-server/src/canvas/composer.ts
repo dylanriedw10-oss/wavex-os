@@ -21,7 +21,7 @@ import { CATALOG_VERSION, type LayoutSpec } from "./catalog.js";
 export type IntentTopic =
   | "spend" | "budget" | "kpis" | "roster" | "redundancy"
   | "ignition" | "health" | "attention" | "simulation" | "timeline"
-  | "runtime" | "unknown";
+  | "runtime" | "adopt" | "approve" | "unknown";
 
 export interface ClassifiedIntent {
   kind: "query" | "propose" | "clarify";
@@ -97,6 +97,17 @@ export function classify(message: string): ClassifiedIntent {
   if (BUDGET_SET_RE.test(text)) return { kind: "propose", topic: "budget", window: "all" };
   if (/\bignite\b/.test(text) && /\b(fleet|now|again|retry)\b/.test(text)) {
     return { kind: "propose", topic: "ignition", window: "all" };
+  }
+  // Path B: "adopt <product/url>". With a URL present the stub can mint the
+  // adopt-product proposal; without one it clarifies (asks for the URL).
+  if (/\badopt\b/.test(text) && /\b(product|site|website|company|existing)\b|https?:\/\/|\.[a-z]{2,}\//.test(text)) {
+    return { kind: "propose", topic: "adopt", window: "all" };
+  }
+  // Build Your Organization's one Confirm: the Review phase sends this
+  // canned utterance; the route enriches the body from the signed manifest
+  // (the stub is sync and never reads disk).
+  if (/\bapprove\b/.test(text) && /\b(organization|org|plan)\b/.test(text)) {
+    return { kind: "propose", topic: "approve", window: "all" };
   }
   for (const [topic, re] of TOPIC_RULES) {
     if (re.test(text)) return { kind: "query", topic, window: classifyWindow(text) };
@@ -260,6 +271,41 @@ export function composeStub(message: string): Composition {
         action: "set-token-budget",
         body: { cap_tokens: cap },
         summary: `Set the token budget cap to ${cap.toLocaleString()} tokens.`,
+      },
+    };
+  }
+
+  if (intent.kind === "propose" && intent.topic === "adopt") {
+    // The URL must be IN the message — the stub never invents one.
+    const m = message.match(/\bhttps?:\/\/[^\s<>)\]"']+|\b(?:[\w-]+\.)+[a-z]{2,}(?:\/[^\s<>)\]"']*)?/i);
+    if (!m) {
+      return {
+        intent: { ...intent, kind: "clarify" }, signature, composedBy: "stub", layout: null,
+        reply: "Paste your product's URL and I'll read it in — for example \"adopt https://acme.com\".",
+      };
+    }
+    const url = m[0];
+    return {
+      intent, signature, composedBy: "stub", layout: null,
+      reply: `I'll read ${url} and wire the product into your organization. Confirm below — reading it is an outbound fetch plus one inference call.`,
+      proposal: {
+        action: "adopt-product",
+        body: { url },
+        summary: `Adopt the existing product at ${url}.`,
+      },
+    };
+  }
+
+  if (intent.kind === "propose" && intent.topic === "approve") {
+    return {
+      intent, signature, composedBy: "stub", layout: null,
+      reply: "Approving activates the organization: agents are hired, the goal and KPIs lock, and the work store seeds. Confirm below.",
+      proposal: {
+        action: "approve-organization",
+        // The route fills manifestSha256 + path from the signed manifest on
+        // disk before persisting — the stub stays pure and synchronous.
+        body: {},
+        summary: "Approve the organization: activate agents, lock the goal and KPIs, seed the work store.",
       },
     };
   }

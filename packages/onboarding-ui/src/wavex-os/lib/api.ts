@@ -196,6 +196,21 @@ export const wavexOsOnboardingApi = {
     "POST", "/wavex-os/onboarding/pillar/5", input,
   ),
 
+  /** The operator's STATED goal — the loop's fixed half.
+   *
+   *  Not a pillar: the pillar schema is vendored and frozen, and this is a
+   *  wavex-layer concern. The server rejects a KPI it cannot name rather
+   *  than coercing it, so a 400 here means the id is wrong, not the value. */
+  strategy: (input: {
+    companyId: string;
+    goal: { kpiId: string; current: number; target: number; days: number };
+    secondaryKpis?: string[];
+    bottleneck?: string | null;
+    stated?: boolean;
+  }) => call<{ ok: true; strategy: { goal: { kpiId: string; current: number; target: number; days: number }; bottleneck: string | null; stated: boolean } }>(
+    "POST", "/wavex-os/onboarding/strategy", input,
+  ),
+
   /** Inference-driven suggestion for the next pillar's field values, based
    *  on prior pillar context. The inline cards call this on mount so the
    *  customer sees pre-highlighted chips ("Suggested: assisted demo —
@@ -377,11 +392,17 @@ export const wavexOsOnboardingApi = {
     call<{ ok: true; manifest: ConnectorManifest; source: "t2" | "fallback"; warnings: string[] }>(
       "GET", `/wavex-os/onboarding/connector-recommendations?companyId=${encodeURIComponent(companyId)}`),
 
-  // Sub-fleet scope — written before swarm-manifest so the route can park
-  // non-selected divisions. mode="full" keeps everything active.
+  // Department parking — written before the swarm is regenerated so the
+  // overlay can park everything outside the kept set.
+  //
+  // `mode` is `"focused"` only. The route still accepts `"full"`, but no
+  // caller sends it: full used to mean "promote every matrix-parked agent
+  // to active", which cancelled the activation verdict the pillar answers
+  // had just produced. Parking is subtractive now, and typing it that way
+  // is what keeps a future caller from reintroducing the override.
   setScope: (input: {
     companyId: string;
-    mode: "full" | "focused";
+    mode: "focused";
     departments: string[];
     custom_labels?: string[];
   }) => call<{ ok: true; scope: { mode: string; departments: string[]; custom_labels?: string[]; set_at: string } }>(
@@ -1126,6 +1147,23 @@ export const wavexOsOnboardingApi = {
   reviewWorkDeliverable: (companyId: string, deliverableId: string, body: { verdict: "approved" | "changes_requested"; note?: string }) =>
     call<import("../../canvas/contract").WorkReviewResponse>(
       "POST", `/api/instance/${encodeURIComponent(companyId)}/work/deliverables/${encodeURIComponent(deliverableId)}/review`, body, { timeoutMs: 15_000 }),
+
+  // ---- Build Your Organization (plan assembly · adopt · approve) ----
+
+  startPlanAssembly: (companyId: string, opts?: { skipInference?: boolean; resume?: boolean }) =>
+    call<import("../../canvas/plan-contract").PlanAssemblyStartResponse>(
+      // The deterministic pipeline answers in ms; the generous ceiling
+      // covers a slow disk, not a model.
+      "POST", "/wavex-os/onboarding/plan-assembly/start", { companyId, ...opts }, { timeoutMs: 60_000 }),
+
+  getPlanAssembly: (companyId: string) =>
+    call<import("../../canvas/plan-contract").PlanAssemblyGetResponse>(
+      "GET", `/wavex-os/onboarding/plan-assembly?companyId=${encodeURIComponent(companyId)}`, undefined, { timeoutMs: 15_000 }),
+
+  adoptProduct: (companyId: string, body: { url: string; orgName?: string }) =>
+    call<import("../../canvas/plan-contract").AdoptProductResult>(
+      // fetch (≤5s + one meta-refresh hop) + one shallow T2 call (≤45s).
+      "POST", `/api/instance/${encodeURIComponent(companyId)}/adopt-product`, body, { timeoutMs: 60_000 }),
 
   listTiers: () =>
     call<{

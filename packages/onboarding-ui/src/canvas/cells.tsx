@@ -395,13 +395,19 @@ function readMetric(api: CatalogKey, d: any): MetricReading | null {
     }
     case "manifest": {
       const g = d.manifest?.goal;
+      // The sub-line is the only room this cell has, so provenance goes
+      // there. `stated !== true` covers the absent flag: the live manifest
+      // carries a stage-band pair with no `stated` key at all.
+      const guessed = g != null && g.stated !== true;
       return { value: g?.current ?? null, display: g?.current != null ? g.current.toLocaleString() : "—",
-        sub: g?.target != null ? `target ${g.target.toLocaleString()}` : "no goal",
+        sub: g?.target != null ? `target ${g.target.toLocaleString()}${guessed ? " · estimated, not stated" : ""}` : "no goal",
         fmt: (n) => n.toLocaleString(), target: g?.target ?? null, days: g?.days ?? null };
     }
     case "kpis": {
       const k = d.kpis?.[0];
-      return { value: k?.currentValue ?? null, display: k?.currentValue != null ? String(k.currentValue) : "—", sub: k?.label ?? "no KPI", fmt: String };
+      const prov = k?.provenance && k.provenance !== "measured" ? ` · ${k.provenance}` : "";
+      return { value: k?.currentValue ?? null, display: k?.currentValue != null ? String(k.currentValue) : "—",
+        sub: k?.label != null ? `${k.label}${prov}` : "no KPI", fmt: String };
     }
     case "ignition":
       return { value: d.agentsWorking ?? null, display: String(d.agentsWorking ?? 0), sub: `agents working · ${d.status}`, fmt: String };
@@ -602,8 +608,12 @@ function TableCell({ cell, companyId, onDrill }: CellProps) {
       body = <Rows head={["Slot", "Template", "Origin"]}
         rows={(d.all_slots as any[]).filter((s) => !s.muted).map((s) => [s.slot, s.template_id, s.origin])} />;
     } else if (api === "kpis") {
-      body = <Rows head={["KPI", "Direction", "Owner", "Current"]} align={["l", "l", "l", "r"]}
-        rows={(d.kpis as any[]).map((k) => [k.label, k.direction === "higher_is_better" ? "↑" : "↓", k.ownerRole ?? "—", k.currentValue ?? "—"])} />;
+      // "Current" is a measurement word and none of these rows earned it —
+      // the pillar-3 baselines are stage-band estimates and the MC row is a
+      // forecast. The column now says which, per row, because the alternative
+      // is a fabricated constant sitting in a table an agent reads as fact.
+      body = <Rows head={["KPI", "Direction", "Owner", "Value", "Source"]} align={["l", "l", "l", "r", "l"]}
+        rows={(d.kpis as any[]).map((k) => [k.label, k.direction === "higher_is_better" ? "↑" : "↓", k.ownerRole ?? "—", k.currentValue ?? "—", k.provenance ?? "unknown"])} />;
     } else if (api === "obs-bottlenecks") {
       body = <Rows head={["KPI", "Owner", "Gap", "Score"]} align={["l", "l", "r", "r"]}
         rows={(d.data as any[]).map((b) => [b.label, b.ownerName ?? "—", b.gap ?? "—", Math.round(b.score)])} />;
@@ -1016,25 +1026,39 @@ function RosterCell({ cell, companyId, onDrill }: CellProps) {
   return <Shell cell={cell} state={state} onDrill={onDrill}>{body}</Shell>;
 }
 
-export function ProposalCard({ proposal, busy, error, onConfirm, onDismiss }: {
+export function ProposalCard({ proposal, busy, error, onConfirm, onDismiss, confirmLabel, children, fill }: {
   proposal: CanvasProposal; busy: boolean; error: string | null;
   onConfirm: () => void; onDismiss?: () => void;
+  confirmLabel?: string;
+  /** Rendered between the summary and the buttons — the Review phase's
+   *  before/after/reason body lives here, inside the same status chrome. */
+  children?: ReactNode;
+  /** Fill the height the caller gave it instead of sizing to content.
+   *
+   *  This is what lets a bounded card compute its own budget in CSS: the
+   *  status chrome and the buttons keep their intrinsic height, `children`
+   *  takes the remainder, and a list inside `children` can flex against a
+   *  box whose height does NOT change when that list clamps. Estimating
+   *  the chrome in JS instead is what let Review's Confirm button fall
+   *  25px below the fold — reason lines wrap, and an estimate cannot know. */
+  fill?: boolean;
 }) {
   const decided = proposal.status !== "pending";
   return (
     // Pending = awaiting your review (amber); committed = decided (emerald);
     // failed = a mutation that did not apply (coral, the rare case).
-    <div className="cv-glass" style={{ ...cellStyle, borderLeft: `3px solid ${proposal.status === "failed" ? "var(--crit)" : proposal.status === "committed" ? "var(--good)" : "var(--attend)"}` }}>
+    <div className="cv-glass" style={{ ...cellStyle, ...(fill ? { height: "100%", minHeight: 0 } : null), borderLeft: `3px solid ${proposal.status === "failed" ? "var(--crit)" : proposal.status === "committed" ? "var(--good)" : "var(--attend)"}` }}>
       <div style={{ fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: ".06em", color: "var(--text-dim)" }}>
         Proposal · {proposal.status}
       </div>
       <div style={{ fontSize: "var(--text-sm)" }}>{proposal.summary}</div>
+      {children}
       {proposal.outcome && <div className="text-dim" style={{ fontSize: "var(--text-xs)" }}>{proposal.outcome.detail}</div>}
       {error && <div style={{ fontSize: "var(--text-xs)", color: "var(--danger)" }}>✗ {error}</div>}
       {!decided && (
         <div style={{ display: "flex", gap: "var(--space-2)" }}>
           <button onClick={onConfirm} disabled={busy} style={{ minHeight: 36 }}>
-            {busy ? "Applying…" : "Confirm"}
+            {busy ? "Applying…" : (confirmLabel ?? "Confirm")}
           </button>
           {onDismiss && <button className="secondary" onClick={onDismiss} disabled={busy} style={{ minHeight: 36 }}>Not now</button>}
         </div>

@@ -33,6 +33,7 @@ import {
 } from "../mission-control/chief-context.js";
 import { withTokenAccounting } from "../lib/token-accounting.js";
 import { BudgetExhaustedError } from "../lib/token-budget.js";
+import { readGoal, isStated, UNSTATED } from "../lib/goal-line.js";
 
 interface HelpMessage {
   role: "user" | "assistant";
@@ -184,13 +185,18 @@ async function summarizeBoardContext(companyId: string): Promise<string> {
     const raw = await readFile(join(onboardingDir, "company.manifest.json"), "utf8");
     const parsed = JSON.parse(raw) as {
       company?: { name?: string };
-      goal?: { kpiId?: string; current?: number; target?: number; days?: number };
       kpi_registry?: { entries?: Array<{ kpiId?: string; label?: string; ownerRole?: string }> };
     };
     if (parsed.company?.name) lines.push(`Company: ${parsed.company.name}`);
-    if (parsed.goal) {
-      const g = parsed.goal;
-      lines.push(`Goal KPI: ${g.kpiId} — current ${g.current ?? "?"} → target ${g.target ?? "?"} (${g.days ?? "?"}d window)`);
+    // The help assistant answers questions about the company's own numbers.
+    // Handing it an estimate without saying so lets it answer "what's our
+    // target?" with a figure nobody set.
+    const g = readGoal(parsed);
+    if (g) {
+      lines.push(
+        `Goal KPI: ${g.kpiId} — current ${g.current} → target ${g.target} (${g.days}d window)`
+        + (isStated(g) ? "" : ` [${UNSTATED.short}]`),
+      );
     }
     const top = parsed.kpi_registry?.entries?.slice(0, 6) ?? [];
     if (top.length) {
@@ -240,7 +246,7 @@ async function summarizePillars(companyId: string): Promise<string> {
   if (p1) {
     if (p1.org_name) lines.push(`Company: ${p1.org_name}`);
     if (p1.industry_hint) lines.push(`Industry: ${p1.industry_hint}`);
-    if (p1.business_model_hint) lines.push(`Business model: ${p1.business_model_hint}`);
+    if (p1.business_model_hint && p1.business_model_hint !== "unknown") lines.push(`Business model: ${p1.business_model_hint}`);
     if (p1.company_context) lines.push(`Context: ${p1.company_context.slice(0, 200)}`);
   }
   const p3 = responses.pillar_3 as { stage?: string; product_state?: string } | undefined;

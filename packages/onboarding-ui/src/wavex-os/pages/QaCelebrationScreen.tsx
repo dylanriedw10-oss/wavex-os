@@ -65,7 +65,7 @@ export function QaCelebrationScreen({ userId, testStatus, testsRun, testsFailed,
 
   function handleSlackSetup(): void {
     onDismiss();
-    navigate("/onboarding-chat?step=notifications");
+    navigate("/build?step=notifications");
   }
 
   return (
@@ -107,7 +107,7 @@ export function QaCelebrationScreen({ userId, testStatus, testsRun, testsFailed,
           style={{
             maxWidth: 480,
             width: "100%",
-            background: "var(--surface, #13131a)",
+            background: "var(--surface)",
             border: "1px solid var(--border)",
             borderRadius: 12,
             padding: "2.5rem 2rem",

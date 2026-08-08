@@ -200,7 +200,7 @@ function summarizePillars(responses: Awaited<ReturnType<typeof loadPillarRespons
   const p1 = (responses.pillar_1 ?? {}) as unknown as Record<string, unknown>;
   if (p1.org_name) lines.push(`Company: ${String(p1.org_name)}`);
   if (p1.industry_hint) lines.push(`Industry: ${String(p1.industry_hint)}`);
-  if (p1.business_model_hint) lines.push(`Business model: ${String(p1.business_model_hint)}`);
+  if (p1.business_model_hint && p1.business_model_hint !== "unknown") lines.push(`Business model: ${String(p1.business_model_hint)}`);
   if (typeof p1.company_context === "string") {
     lines.push(`Founder context: ${p1.company_context.slice(0, 300)}`);
   }

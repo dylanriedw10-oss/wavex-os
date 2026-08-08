@@ -1,94 +1,59 @@
-/** Inline prompt card for Pillar 3 — product_state + conditional stage.
+/** Inline prompt card for Pillar 3 — where the product stands. One chip
+ *  group, and the second of the two corrections the interview still makes.
  *
- *  The chat asks "Where are you in the product journey?" and renders this
- *  card as the assistant's response. The operator picks a product state
- *  chip; if the choice is non-pre-product, a revenue-stage chip group
- *  appears. Submit fires POST /pillar/3 and the chat continues. */
+ *  The revenue-BRACKET group that used to follow it is gone. Strategy asks
+ *  for the actual number one card later, and a bracket derived from a typed
+ *  number beats a bracket clicked from a menu: it can't disagree with the
+ *  goal, and it dissolves the vocabulary drift that came from three
+ *  different stage lists never being reconciled. The card therefore does not
+ *  POST — the answer is held until the number exists, and BuildOrgPage
+ *  writes pillar 3 once, complete.
+ *
+ *  `product_state` is also what `lib/placement.ts` decides the rung from, so
+ *  this single chip carries the whole pre-product / informal / operating
+ *  distinction. */
 
-import { useEffect, useState } from "react";
-import type { Pillar3Response } from "@wavex-os/plugin-onboarding";
-import { wavexOsOnboardingApi, ApiError } from "../../lib/api";
+import { useState } from "react";
 import { ResponseChips } from "../ResponseChips";
-import { PRODUCT_STATES, STAGE_PRE, STAGE_REVENUE } from "../../lib/options";
-import { previewBaseline, formatBaselinePreview } from "../../lib/stage-baselines";
+import { PRODUCT_STATES } from "../../lib/options";
 import { usePillarSuggestion } from "../../lib/use-pillar-suggestion";
 
 const PRODUCT_OPTS = PRODUCT_STATES.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
-const STAGE_PRE_OPTS = STAGE_PRE.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
-const STAGE_REV_OPTS = STAGE_REVENUE.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
 
 interface Props {
   companyId: string;
-  onDone: (response: Pillar3Response) => void;
+  /** The chosen product state — canonical id, or the operator's own words
+   *  when they picked "other". Nothing is written yet. */
+  onDone: (productState: string, custom: boolean) => void;
 }
 
 export function Pillar3PromptCard({ companyId, onDone }: Props) {
   const [productCanon, setProductCanon] = useState<string[]>([]);
   const [productCustom, setProductCustom] = useState<string[]>([]);
-  const [stageCanon, setStageCanon] = useState<string[]>([]);
-  const [stageCustom, setStageCustom] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // Pull inference-grounded suggestions on mount based on Pillar 1 context.
-  // Chips that match get a ✨ sparkle outline; the operator can still pick
-  // anything. Once a suggestion lands, auto-preselect the product_state so
-  // the customer just confirms / overrides (one less click in the common case).
+  // NO AUTO-SELECT. The suggestion is SHOWN — sparkle outline, reasoning line —
+  // and the operator clicks it.
+  //
+  // Preselecting made `ready` true with zero interaction, so one click on
+  // Continue persisted a model's guess as the operator's stated answer, and
+  // nothing recorded whether a chip was ever touched. Every downstream
+  // consumer then read it as `operator-claimed`: the placement rung, the
+  // capability graph, the claim ledger, the contradiction detector. One click
+  // is the entire difference between a claim and a guess, and it is worth it.
   const suggestion = usePillarSuggestion(3, companyId);
   const suggestedProduct = typeof suggestion.recommended.product_state === "string"
     ? (suggestion.recommended.product_state as string)
     : null;
-  const suggestedStage = typeof suggestion.recommended.stage === "string"
-    ? (suggestion.recommended.stage as string)
-    : null;
-
-  useEffect(() => {
-    if (!suggestion.loaded) return;
-    if (productCanon.length > 0 || productCustom.length > 0) return;  // operator already picked
-    if (suggestedProduct && PRODUCT_OPTS.some((o) => o.value === suggestedProduct)) {
-      setProductCanon([suggestedProduct]);
-    }
-  }, [suggestion.loaded, suggestedProduct]);
-  useEffect(() => {
-    if (!suggestion.loaded) return;
-    if (stageCanon.length > 0 || stageCustom.length > 0) return;
-    if (suggestedStage) {
-      const inPre = STAGE_PRE_OPTS.some((o) => o.value === suggestedStage);
-      const inRev = STAGE_REV_OPTS.some((o) => o.value === suggestedStage);
-      if (inPre || inRev) setStageCanon([suggestedStage]);
-    }
-  }, [suggestion.loaded, suggestedStage]);
 
   const productValue = productCustom[0] ?? productCanon[0] ?? "";
   const productIsCustom = productCustom.length > 0;
-  // Pre-product / idea-only states show the pre-launch stage options; anything
-  // else (live, built, custom) gets revenue brackets.
-  const showStage = !!productValue;
-  const isPre = productValue === "idea_only" || productValue === "prototype_mvp";
-  const stageOpts = isPre ? STAGE_PRE_OPTS : STAGE_REV_OPTS;
-  const stageValue = stageCustom[0] ?? stageCanon[0] ?? "";
-  const stageIsCustom = stageCustom.length > 0;
+  const ready = !!productValue;
 
-  const ready = !!productValue && !!stageValue;
-
-  async function handleSubmit(): Promise<void> {
+  function handleSubmit(): void {
     if (!ready) return;
     setSubmitting(true);
-    setError(null);
-    try {
-      const result = await wavexOsOnboardingApi.pillar3({
-        companyId,
-        product_state: (productIsCustom ? "other" : productValue) as Pillar3Response["product_state"],
-        product_state_other: productIsCustom ? productValue : undefined,
-        stage: stageIsCustom ? "other" : stageValue,
-        stage_other: stageIsCustom ? stageValue : undefined,
-      });
-      onDone(result.response);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : (e as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
+    onDone(productValue, productIsCustom);
   }
 
   return (
@@ -120,67 +85,18 @@ export function Pillar3PromptCard({ companyId, onDone }: Props) {
           customValues={productCustom}
           allowCustom
           customLabel="Other product status"
-          onChange={(v) => { setProductCanon(v); setStageCanon([]); setStageCustom([]); }}
-          onCustomChange={(v) => { setProductCustom(v); setStageCanon([]); setStageCustom([]); }}
+          onChange={setProductCanon}
+          onCustomChange={setProductCustom}
           disabled={submitting}
           suggestedValues={suggestedProduct ? [suggestedProduct] : []}
         />
       </div>
 
-      {showStage && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: "0.35rem", color: "var(--text-dim)" }}>
-            {isPre ? "Where exactly?" : "Revenue?"}
-          </div>
-          <ResponseChips
-            mode="single"
-            options={stageOpts}
-            values={stageCanon}
-            customValues={stageCustom}
-            allowCustom
-            customLabel={isPre ? "Other launch state" : "Other revenue"}
-            onChange={setStageCanon}
-            onCustomChange={setStageCustom}
-            disabled={submitting}
-            suggestedValues={suggestedStage ? [suggestedStage] : []}
-          />
-        </div>
-      )}
-
-      {/* Baseline preview — shows the KPI defaults we'll seed for the
-       *  selected (product_state, stage) combo. Display-only. */}
-      {productValue && stageValue && (() => {
-        const ps = productIsCustom ? "other" : productValue;
-        const st = stageIsCustom ? "other" : stageValue;
-        const b = previewBaseline(ps, st);
-        if (!b) return null;
-        return (
-          <div style={{
-            padding: "0.5rem 0.75rem",
-            background: "var(--bg)",
-            border: "1px solid var(--accent)",
-            borderRadius: 6,
-            fontSize: 11,
-            color: "var(--text-dim)",
-            lineHeight: 1.55,
-          }}>
-            <div style={{ fontWeight: 600, color: "var(--accent)", marginBottom: "0.2rem" }}>
-              Baseline KPIs we'll seed
-            </div>
-            {formatBaselinePreview(b)}
-          </div>
-        );
-      })()}
-
-      {error && (
-        <div style={{ color: "var(--warning)", fontSize: 12 }}>✗ {error}</div>
-      )}
-
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <button
           type="button"
           data-testid="pillar3-submit"
-          onClick={() => void handleSubmit()}
+          onClick={handleSubmit}
           disabled={submitting || !ready}
           style={{
             padding: "0.4rem 0.85rem",
@@ -194,7 +110,7 @@ export function Pillar3PromptCard({ companyId, onDone }: Props) {
             opacity: submitting || !ready ? 0.6 : 1,
           }}
         >
-          {submitting ? "Saving…" : "Continue →"}
+          Continue →
         </button>
       </div>
     </div>

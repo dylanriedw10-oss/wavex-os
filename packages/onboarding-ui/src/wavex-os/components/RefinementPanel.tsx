@@ -129,7 +129,7 @@ export function RefinementPanel({ companyId, onApplied, onSkip }: Props) {
       maxWidth: 720,
       width: "100%",
       padding: "1rem",
-      background: "#13131a",
+      background: "var(--surface)",
       border: "1px solid var(--border)",
       borderRadius: 8,
       display: "flex",

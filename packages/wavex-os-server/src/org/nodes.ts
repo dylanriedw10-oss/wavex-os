@@ -20,6 +20,21 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { getOnboardingDir } from "../state-bridge.js";
 import { resolveAllSlots } from "../lib/redundancy.js";
+import { readGoal, isStated, goalProvenance, goalTitle, UNSTATED, type ManifestGoal } from "../lib/goal-line.js";
+
+/** The provenance suffix for a goal shown on a display surface, or "" when
+ *  the operator actually chose it.
+ *
+ *  One helper because the goal renders on this file TWICE — the company
+ *  node's objective and the `metric:goal` node's snapshot — and only the
+ *  first carried a marker. The second is the one titled "the compass · the
+ *  one number the organization is steering toward", which is the worse place
+ *  to print a stage-band constant as if it were a measurement. */
+function goalSuffix(goal: ManifestGoal | null): string {
+  if (!goal) return "";
+  const p = goalProvenance(goal);
+  return p === "stated" ? "" : ` · ${p === "fallback" ? UNSTATED.short : UNSTATED.unrecorded}`;
+}
 import type { OrgFile } from "./store.js";
 import { computeGravity } from "./store.js";
 
@@ -60,7 +75,10 @@ interface TreeCtx {
   slots: SlotRow[];
   rootSlot: string | null;
   byParent: Map<string, SlotRow[]>;
-  goal: { metric?: string; current?: number; target?: number; days?: number } | null;
+  /** The manifest goal verbatim. It is `kpiId`, NOT `metric` — this type
+   *  said `metric` and both consumers read it, so the KPI name was silently
+   *  swallowed everywhere the company's objective rendered. */
+  goal: ManifestGoal | null;
   pillarsAnswered: number;              // 0..5
   budget: { cap: number | null; used: number } | null;
   liveAgents: Set<string>;              // agentName values from live runs (lowercase)
@@ -177,7 +195,7 @@ export async function loadTreeCtx(app: FastifyInstance, req: any, companyId: str
 
   return {
     slots, rootSlot, byParent,
-    goal: manifest?.goal ?? null,
+    goal: readGoal(manifest),
     pillarsAnswered,
     budget,
     liveAgents,
@@ -210,7 +228,9 @@ const METRICS: Array<{ id: string; title: string; description: string; snapshot:
     snapshot: (ctx) => ctx.budget?.cap ? `cap ${fmtTokens(ctx.budget.cap)} · ${Math.round((ctx.budget.used / ctx.budget.cap) * 100)}% used` : "no cap set" },
   { id: "metric:goal", title: "Headline goal", prompt: "show goals",
     description: "The compass — the one number the organization is steering toward.",
-    snapshot: (ctx) => ctx.goal?.target != null ? `${ctx.goal.current?.toLocaleString() ?? "—"} of ${ctx.goal.target.toLocaleString()}${ctx.goal.days ? ` in ${ctx.goal.days}d` : ""}` : "no goal captured" },
+    snapshot: (ctx) => ctx.goal?.target != null
+      ? `${ctx.goal.current?.toLocaleString() ?? "—"} of ${ctx.goal.target.toLocaleString()}${ctx.goal.days ? ` in ${ctx.goal.days}d` : ""}${goalSuffix(ctx.goal)}`
+      : "no goal captured" },
 ];
 
 function fmtTokens(n: number): string {
@@ -236,8 +256,15 @@ export function buildNode(ctx: TreeCtx, org: OrgFile, companyId: string, id: str
       momentum: null,
       completeness: Math.round((ctx.pillarsAnswered / 5) * 100),
       gravity: grav(id),
-      objective: ctx.goal?.target != null
-        ? { title: `${ctx.goal.metric ?? "goal"}: ${ctx.goal.current?.toLocaleString() ?? "?"} → ${ctx.goal.target.toLocaleString()}`, status: "unknown", blockedBy: [] }
+      // The objective renders where a measurement belongs, so an estimated
+      // target has to say so — same rule the Review card follows.
+      objective: ctx.goal
+        ? {
+            // Three-valued, via the shared helper: "a band produced this" and
+            // "nobody recorded who chose this" are different things to say.
+            title: `${goalTitle(ctx.goal)}${goalSuffix(ctx.goal)}`,
+            status: "unknown", blockedBy: [],
+          }
         : null,
     };
   }
@@ -325,6 +352,11 @@ export function capabilitiesOf(node: OrgNodeDto): NodeCapability[] {
   switch (node.kind) {
     case "company":
       return [
+        // FIRST deliberately: pre-activation, adoption is the company's most
+        // valuable affordance and the composer caps chips at 4 — the client
+        // filters it out once the runtime is seeded (an operating company
+        // has nothing left to adopt).
+        cap("c-adopt", "Can Adopt Existing Product", "custom", "adopt my existing product"),
         cap("c-spend", "Can Explain Spend", "explain", "why did spend spike"),
         cap("c-goal", "Can Show Goals", "explain", "show goals"),
         cap("c-team", "Can Show Team", "show_children", "show me the team"),

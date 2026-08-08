@@ -67,7 +67,7 @@ export function Signup(): JSX.Element {
     });
 
     // After attribution is captured, send the user to the onboarding flow.
-    navigate("/onboarding-chat", { replace: true });
+    navigate("/build", { replace: true });
   }
 
   return (

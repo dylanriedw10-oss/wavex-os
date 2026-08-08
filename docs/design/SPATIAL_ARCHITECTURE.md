@@ -8,6 +8,37 @@ Where things live and how depth works. The full build spec is
 masthead → rail → instrument → shelf. Only the instrument changes. One
 dominant object per screen — a lens REPLACES the wheel, never stacks on it.
 
+**Fixed is now enforced, not asserted (Rev 10).** The shell is `height: 100dvh`
++ `overflow: hidden`; the instrument flexes with `minHeight: 0`; the shelf is
+pinned with `flexShrink: 0`. Before Rev 10 the root carried `minHeight: 100vh`,
+which let the whole column grow and put the scroll on the document — the zones
+were never actually fixed.
+
+## The fit law (Rev 10)
+
+> Density is bounded by the WINDOW, not by the content. A list renders what
+> fits, states its true total, and sends the remainder one level deeper.
+> Only the record itself may scroll.
+
+Budget at the **700px floor** (1024×700, the supported minimum):
+
+| Zone | Px | Owner |
+|---|---|---|
+| pulse + masthead | 55 | shell chrome |
+| workspace padding | 32 | shell chrome |
+| **instrument** | **~590** | the view — measured and published via `canvas/layout.ts` |
+| shelf (when present) | ~90 | board + pins, pinned, never yields |
+
+L0 spends its instrument on: rail (52) + caption (56) + hub row (48) = 164 of
+chrome, leaving ~426 for the face → wheel scale ≈ 0.82.
+
+Every clamped region derives its row count from `fitRows(availPx, rowPx)`. New
+regions must do the same — a fresh `slice(0, N)` is a Quality Gate failure.
+
+**The two named exceptions** (append-only records; clamping them would hide or
+edit the record): the transcript (`.cv-thread`) and the unrolled verbatim
+deliverable at L3 (`.cv-record`).
+
 ## The descent (org depth = detail depth)
 
 | Level | You are | Density budget |

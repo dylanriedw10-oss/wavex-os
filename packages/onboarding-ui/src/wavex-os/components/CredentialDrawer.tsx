@@ -7,7 +7,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { wavexOsOnboardingApi, ApiError } from "../lib/api";
-import { ResponseChips } from "./ResponseChips";
 
 interface Props {
   companyId: string;
@@ -15,12 +14,12 @@ interface Props {
   onCancel: () => void;
 }
 
-const SKIP_REASON_OPTS = [
-  { value: "not_relevant", label: "Not relevant for our stage" },
-  { value: "later", label: "Will configure later from Mission Control" },
-  { value: "manual_integration", label: "Data lives in another tool we'll integrate manually" },
-  { value: "no_admin_access", label: "No admin access yet" },
-];
+/** Skipping used to open a four-option "Why?" follow-up. Nothing read the
+ *  answer — it was stored as a string and rendered back to the person who
+ *  typed it — so it cost a decision and bought a label. Skip is now one
+ *  click, and the reason recorded is exactly what is known: the operator
+ *  skipped it. */
+const SKIP_REASON = "Skipped by operator";
 
 type ConnectorRow = NonNullable<Awaited<ReturnType<typeof wavexOsOnboardingApi.listCredentials>>>["connectors"][number];
 
@@ -148,9 +147,6 @@ function ConnectorCard({ companyId, c, refresh }: { companyId: string; c: Connec
   const [vaulting, setVaulting] = useState(false);
   const [skipping, setSkipping] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [skipMode, setSkipMode] = useState(false);
-  const [skipCanon, setSkipCanon] = useState<string[]>([]);
-  const [skipCustom, setSkipCustom] = useState<string[]>([]);
 
   const isVaulted = c.status === "vaulted_valid" || c.status === "vaulted_unvalidated";
   const isSkipped = c.status === "skipped";
@@ -181,13 +177,10 @@ function ConnectorCard({ companyId, c, refresh }: { companyId: string; c: Connec
   }
 
   async function handleSkip(): Promise<void> {
-    const reasonOpt = SKIP_REASON_OPTS.find((o) => o.value === skipCanon[0]);
-    const reason = skipCustom[0] ?? reasonOpt?.label ?? "Operator skip";
     setSkipping(true);
     setError(null);
     try {
-      await wavexOsOnboardingApi.skipCredential({ companyId, connectorId: c.connectorId, reason });
-      setSkipMode(false);
+      await wavexOsOnboardingApi.skipCredential({ companyId, connectorId: c.connectorId, reason: SKIP_REASON });
       refresh();
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
@@ -250,7 +243,7 @@ function ConnectorCard({ companyId, c, refresh }: { companyId: string; c: Connec
         </div>
       )}
 
-      {!isVaulted && !isSkipped && !skipMode && !mcpManaged && !composio && c.expectedKeys.length > 0 && (
+      {!isVaulted && !isSkipped && !mcpManaged && !composio && c.expectedKeys.length > 0 && (
         <>
           {c.expectedKeys.map((k) => (
             <input
@@ -283,18 +276,18 @@ function ConnectorCard({ companyId, c, refresh }: { companyId: string; c: Connec
             >
               {vaulting || testing ? (testing ? "Testing…" : "Vaulting…") : c.hasProbe ? "Vault & test" : "Vault"}
             </button>
-            <button type="button" onClick={() => setSkipMode(true)} style={miniBtn(false)}>
+            <button type="button" onClick={() => void handleSkip()} disabled={skipping} style={miniBtn(false)}>
               Skip
             </button>
           </div>
         </>
       )}
 
-      {!isVaulted && !isSkipped && composio && !mcpManaged && !skipMode && (
+      {!isVaulted && !isSkipped && composio && !mcpManaged && (
         <DrawerComposioConnect
           connectorId={c.connectorId}
           companyId={companyId}
-          onSkip={() => setSkipMode(true)}
+          onSkip={() => void handleSkip()}
           onConnected={refresh}
         />
       )}
@@ -328,33 +321,6 @@ function ConnectorCard({ companyId, c, refresh }: { companyId: string; c: Connec
         </div>
       )}
 
-      {skipMode && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem", marginTop: "0.4rem" }}>
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Why?</div>
-          <ResponseChips
-            mode="single"
-            options={SKIP_REASON_OPTS}
-            values={skipCanon}
-            customValues={skipCustom}
-            allowCustom
-            customLabel="Other reason"
-            onChange={setSkipCanon}
-            onCustomChange={setSkipCustom}
-            disabled={skipping}
-          />
-          <div style={{ display: "flex", gap: "0.35rem" }}>
-            <button
-              type="button"
-              onClick={() => void handleSkip()}
-              disabled={skipping}
-              style={miniBtn(true)}
-            >
-              {skipping ? "Skipping…" : "Confirm skip"}
-            </button>
-            <button type="button" onClick={() => setSkipMode(false)} style={miniBtn(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
 
       {error && (
         <div style={{ color: "var(--warning)", fontSize: 11, marginTop: "0.3rem" }}>✗ {error}</div>

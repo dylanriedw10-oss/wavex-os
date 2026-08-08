@@ -20,8 +20,24 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 export const HEADLINES: Partial<Record<CatalogKey, Extract>> = {
   "token-usage": (j) => num((j?.usage?.total?.input_tokens ?? NaN) + (j?.usage?.total?.output_tokens ?? NaN)),
   "token-budget": (j) => num(j?.used),
-  "manifest": (j) => num(j?.manifest?.goal?.current),
-  "kpis": (j) => num(j?.kpis?.[0]?.currentValue),
+  // A HEADLINE is a measurement slot — a big number rendered as fact. When
+  // the operator declined to state a goal, `current` is a stage-band
+  // invention, so there is nothing to headline and null omits the cell
+  // entirely. This is the literal case `lib/goal-synthesis.ts` forbids:
+  // "Consumers MUST NOT render a `stated: false` number where a measurement
+  // belongs."
+  // `!== true`, not `=== false`. The one real company on disk carries a goal
+  // with NO `stated` key whose numbers are byte-identical to the stage band —
+  // so the lenient test passed it through and headlined an invention. A
+  // headline slot needs a positive record that a person chose the number;
+  // absence of a record is not that record.
+  "manifest": (j) => (j?.manifest?.goal?.stated !== true ? null : num(j?.manifest?.goal?.current)),
+  // Same rule, other fabrication. `kpis[0].currentValue` is the pillar-3
+  // snapshot, which the vendored generator stamps `ai_estimated: true` on
+  // EVERY path — for ricoma it is the stage table's constant, not a reading.
+  // The row still renders in the KPI table (labelled); it just cannot be the
+  // big number a delta is measured from.
+  "kpis": (j) => (j?.kpis?.[0]?.provenance === "measured" ? num(j?.kpis?.[0]?.currentValue) : null),
   "ignition": (j) => num(j?.agentsWorking),
   "redundancy": (j) => (Array.isArray(j?.all_slots) ? j.all_slots.filter((s: any) => !s.muted).length : null),
   "runtime-dashboard": (j) => num(j?.dashboard?.agents?.running),

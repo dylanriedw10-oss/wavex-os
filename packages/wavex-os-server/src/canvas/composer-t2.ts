@@ -46,7 +46,9 @@ async function companySummary(companyId: string): Promise<string> {
   const lines: string[] = [];
   if (p1?.org_name) lines.push(`Company: ${p1.org_name}`);
   if (p1?.industry_hint) lines.push(`Industry: ${p1.industry_hint}`);
-  if (p1?.business_model_hint) lines.push(`Model: ${p1.business_model_hint}`);
+  // "unknown" is the enum's word for absence — a prose line saying it is
+  // noise, and a prose line omitting it is silence. Silence is the honest one.
+  if (p1?.business_model_hint && p1.business_model_hint !== "unknown") lines.push(`Model: ${p1.business_model_hint}`);
   return lines.join(" · ");
 }
 

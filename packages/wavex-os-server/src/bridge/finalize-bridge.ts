@@ -19,6 +19,7 @@ import {
   agentIdForSlot, modelForTier, slotToHumanName, templateIdForSlot, tierForSlot,
 } from "./catalog.js";
 import { selectTemplatesForManifest } from "../selection/scorer.js";
+import { canonicalKpiId } from "../lib/kpi-registry.js";
 
 interface ManifestWithOverlays extends CompanyManifest {
   template_overlays?: Record<string, string>;
@@ -243,6 +244,45 @@ const CANONICAL_KPIS = [
   { kpiId: "monthly_recurring_revenue", label: "Monthly Recurring Revenue (USD)", direction: "up" },
 ] as const;
 
+/** KPI → owning slot, derived from the workflow manifest's bundle_workflows —
+ *  the ONLY KPI↔agent association the product has (each bundle names an
+ *  `owner` slot and the `kpis_moved` it exists to move). Bundles iterate in
+ *  sorted-key order so the pick is stable across runs.
+ *
+ *  A bundle owner can legitimately be scope-parked (e.g. cpo.growth under a
+ *  focused scope) — fall back to the owner's root slot when that root is
+ *  active, else leave the columns honestly null with a warning. */
+function resolveKpiOwner(
+  manifest: CompanyManifest,
+  kpiId: string,
+  warnings: string[],
+): string | null {
+  const bundles = (manifest as unknown as {
+    workflow_manifest?: { bundle_workflows?: Record<string, { owner?: string; kpis_moved?: string[] }> };
+  }).workflow_manifest?.bundle_workflows;
+  if (!bundles) return null;
+
+  const agents = (manifest.swarm_manifest?.agents ?? {}) as Record<string, { status?: string }>;
+  const isActive = (slot: string) => agents[slot]?.status === "active";
+
+  for (const key of Object.keys(bundles).sort()) {
+    const b = bundles[key];
+    const owner = b?.owner;
+    if (!owner) continue;
+    const moved = (b?.kpis_moved ?? []).map((id) => canonicalKpiId(id));
+    if (!moved.includes(kpiId)) continue;
+    if (isActive(owner)) return owner;
+    const root = owner.split(".")[0]!;
+    if (root !== owner && isActive(root)) {
+      warnings.push(`kpi ${kpiId}: bundle owner ${owner} is not active — assigned to ${root}`);
+      return root;
+    }
+    warnings.push(`kpi ${kpiId}: bundle owner ${owner} is not active and has no active root — owner left null`);
+    return null;
+  }
+  return null;
+}
+
 /** Slice 2 — writes KPI definitions + baseline snapshots.
  *
  *  Idempotent: deletes then re-inserts company_kpis for this company.
@@ -252,7 +292,33 @@ export async function bridgeKpis(
   manifest: CompanyManifest,
   companyId: string,
   db: Db,
-): Promise<{ kpis: number }> {
+): Promise<{ kpis: number; warnings: string[] }> {
+  const warnings: string[] = [];
+
+  // THE PLAN LOCK (Build Your Organization): once approved, the KPIs are
+  // FIXED — the delete-reinsert idempotency below would silently rewrite
+  // them on any re-activate after manifest drift. When locked: preserve the
+  // rows; only fill owner columns that are still null (owner resolution may
+  // have improved without the benchmark moving).
+  const lockedAt = (manifest as { plan_locked_at?: string }).plan_locked_at;
+  if (lockedAt) {
+    const existing = await db.select().from(companyKpis).where(sql`${companyKpis.companyId} = ${companyId}`);
+    if (existing.length > 0) {
+      let filled = 0;
+      for (const row of existing) {
+        if (row.ownerRole !== null) continue;
+        const ownerSlot = resolveKpiOwner(manifest, row.kpiId, warnings);
+        if (!ownerSlot) continue;
+        await db.update(companyKpis)
+          .set({ ownerRole: ownerSlot, kpiOwnerAgentId: agentIdForSlot(companyId, ownerSlot) })
+          .where(sql`${companyKpis.companyId} = ${companyId} AND ${companyKpis.kpiId} = ${row.kpiId}`);
+        filled += 1;
+      }
+      warnings.push(`plan locked at ${lockedAt} — KPI definitions preserved${filled ? `, ${filled} null owners filled` : ""}`);
+      return { kpis: existing.length, warnings };
+    }
+  }
+
   // Delete existing KPI definitions so re-running activate is idempotent.
   await db.delete(companyKpis).where(sql`${companyKpis.companyId} = ${companyId}`);
 
@@ -265,6 +331,7 @@ export async function bridgeKpis(
   const now = new Date();
 
   for (const kpi of CANONICAL_KPIS) {
+    const ownerSlot = resolveKpiOwner(manifest, kpi.kpiId, warnings);
     await db.insert(companyKpis).values({
       companyId,
       kpiId: kpi.kpiId,
@@ -272,8 +339,8 @@ export async function bridgeKpis(
       direction: kpi.direction,
       targetMicros: kpi.kpiId === "burn_multiple" ? burnMultipleTargetMicros : null,
       windowDays: "30",
-      kpiOwnerAgentId: null,
-      ownerRole: null,
+      kpiOwnerAgentId: ownerSlot ? agentIdForSlot(companyId, ownerSlot) : null,
+      ownerRole: ownerSlot,
       createdAt: now,
     });
 
@@ -287,5 +354,5 @@ export async function bridgeKpis(
     });
   }
 
-  return { kpis: CANONICAL_KPIS.length };
+  return { kpis: CANONICAL_KPIS.length, warnings };
 }

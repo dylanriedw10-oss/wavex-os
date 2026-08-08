@@ -99,11 +99,12 @@ function authReq(req: FastifyRequest) {
 /** Mirrors fieldSpecs in pillars.ts. Keep in sync if either changes. */
 const FIELD_SPECS: Record<number, { fields: string; valid: Record<string, string[]> }> = {
   3: {
-    fields: "product_state, stage",
+    // `stage` is no longer ASKED — it derives from the number Strategy
+          // collects. Requesting it spent tokens on a field the card cannot
+          // apply, in a vocabulary sharing ZERO values with the shipped chips.
+          fields: "product_state",
     valid: {
       product_state: ["live_paying_customers", "built_not_selling", "prototype_mvp", "idea_only"],
-      stage: ["0_10k_mrr", "10k_100k_mrr", "100k_1m_mrr", "1m_10m_mrr", "10m_plus_mrr",
-              "pre_revenue_validating", "pre_revenue_building", "pre_revenue_idea"],
     },
   },
   4: {
@@ -111,7 +112,7 @@ const FIELD_SPECS: Record<number, { fields: string; valid: Record<string, string
     valid: {
       lead_sources: ["inbound_ads_meta_google", "outbound_cold", "referral_word_of_mouth",
                      "content_seo", "product_led_viral", "partnerships", "events", "none_yet"],
-      sales_motion: ["plg_self_serve", "assisted_demo", "high_touch_enterprise",
+      sales_motion: ["self_serve_plg", "assisted_demo", "high_touch_enterprise",
                      "services_to_saas", "marketplace", "transactional", "no_motion_yet"],
     },
   },
@@ -136,7 +137,7 @@ function buildPrompt(
   const ctx: string[] = [];
   if (p1.org_name) ctx.push(`Company: ${p1.org_name}`);
   if (p1.industry_hint) ctx.push(`Industry: ${p1.industry_hint}`);
-  if (p1.business_model_hint) ctx.push(`Business model: ${p1.business_model_hint}`);
+  if (p1.business_model_hint && p1.business_model_hint !== "unknown") ctx.push(`Business model: ${p1.business_model_hint}`);
   if (p1.company_context) ctx.push(`Context: ${p1.company_context.slice(0, 400)}`);
   if (p1.inferred_signals) {
     const keys = Object.entries(p1.inferred_signals).slice(0, 6)

@@ -28,7 +28,7 @@ export interface WorkGoal {
   title: string;
   description: string;
   status: GoalStatus;
-  source: "manifest" | "operator";
+  source: "manifest" | "operator" | "plan";
   createdAt: string;
 }
 
@@ -37,6 +37,15 @@ export interface WorkTask {
   goalId: string;
   title: string;
   brief: string;
+  /** THE ARTIFACT this task produces — the object the operator interacts
+   *  with. Deliverables are the UI; the task and the agent behind it are
+   *  implementation details of producing one. Optional so work stores
+   *  written before this existed still parse. */
+  deliverable?: string;
+  /** Present-continuous form, shown ONLY while running ("Researching
+   *  competitors…"); `title` is shown pending and settled. The
+   *  content/activeForm pair from the dynamic-workflow-panel contract. */
+  activeForm?: string;
   assigneeSlot: string;
   status: TaskStatus;
   dependsOn: string[];

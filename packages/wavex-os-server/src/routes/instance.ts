@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
 import { getOnboardingDir, getInstanceDir } from "../state-bridge.js";
+import { canonicalKpiId } from "../lib/kpi-registry.js";
 
 function authReq(req: FastifyRequest) {
   return { method: req.method, headers: req.headers as Record<string, string> };
@@ -64,7 +65,8 @@ export function registerInstanceRoutes(app: FastifyInstance): void {
     if (!manifest) return reply.status(404).send({ error: "manifest not found", companyId });
 
     // Build wavex KPI registry from upstream sources:
-    //   1. kpi_snapshot_initial — 12 baseline measurements from Pillar 3
+    //   1. kpi_snapshot_initial — Pillar 3's stage-band ESTIMATES (not
+    //      measurements: the generator stamps ai_estimated on every path)
     //   2. mc_winner.mean_mrr_growth — MC projection (when present)
     //   3. swarm topology — agent counts as system KPIs
     type KpiRow = {
@@ -73,6 +75,19 @@ export function registerInstanceRoutes(app: FastifyInstance): void {
       direction: "higher_is_better" | "lower_is_better";
       ownerRole?: string;
       currentValue?: number;
+      /** Where `currentValue` came from. REQUIRED, so a new source cannot be
+       *  added without answering the question.
+       *
+       *  Every row on this route used to arrive unmarked, and the comment
+       *  above called them "12 baseline measurements". They are not: the
+       *  pillar-3 snapshot is stamped `ai_estimated: true` on every path by
+       *  the vendored generator, and for a company on the top revenue band
+       *  the MRR row is byte-identical to that band's table constant. It was
+       *  then rendered in the KPI table beside real numbers, headlined as a
+       *  delta baseline, and frozen into a non-expiring canvas claim an agent
+       *  reads back as precedent. Nothing downstream could recover the flag,
+       *  because it was dropped here. */
+      provenance: "measured" | "estimated" | "projected";
       targetMicros?: number;
       windowDays?: number;
     };
@@ -81,6 +96,12 @@ export function registerInstanceRoutes(app: FastifyInstance): void {
     // Headline KPI: MRR (from kpi_snapshot_initial)
     const snap = (manifest as { pillar_responses?: { pillar_3?: { kpi_snapshot_initial?: Record<string, number> } } })
       .pillar_responses?.pillar_3?.kpi_snapshot_initial;
+    // The vendored generator sets this on every path — there is no branch on
+    // which the snapshot is a reading. Read it anyway rather than hardcoding
+    // "estimated", so the day a real measurement lands this route tells the
+    // truth without being edited.
+    const snapEstimated = (manifest as { pillar_responses?: { pillar_3?: { kpi_snapshot_initial?: { ai_estimated?: boolean } } } })
+      .pillar_responses?.pillar_3?.kpi_snapshot_initial?.ai_estimated !== false;
     if (snap) {
       const KPI_DEFS: Array<{ id: keyof typeof snap; label: string; dir: "higher_is_better" | "lower_is_better"; owner: string }> = [
         { id: "mrr", label: "Monthly Recurring Revenue", dir: "higher_is_better", owner: "ceo" },
@@ -98,11 +119,16 @@ export function registerInstanceRoutes(app: FastifyInstance): void {
         const v = snap[k.id];
         if (v == null) continue;
         kpis.push({
-          kpiId: String(k.id),
+          // The snapshot keys are the vendored SHORT ids; the wire speaks the
+          // canonical namespace (lib/kpi-registry.ts) so rows join with
+          // manifest.goal.kpiId and the DB's company_kpis without aliasing
+          // on every consumer.
+          kpiId: canonicalKpiId(String(k.id)),
           label: k.label,
           direction: k.dir,
           ownerRole: k.owner,
           currentValue: v,
+          provenance: snapEstimated ? "estimated" : "measured",
         });
       }
     }
@@ -116,6 +142,9 @@ export function registerInstanceRoutes(app: FastifyInstance): void {
         direction: "higher_is_better",
         ownerRole: "ceo",
         currentValue: mc.mean_mrr_growth,
+        // A Monte-Carlo mean over the stage-table snapshot — a forecast, and
+        // it sat unlabelled in the same column as the baselines.
+        provenance: "projected",
       });
     }
 

@@ -55,6 +55,12 @@ whichever freshly generated objects, are actually relevant to the question that 
 panel can show either a persistent child (walking into it is a normal descent) or a freshly
 generated object that exists only in that workspace.
 
+Generation follows the delegation trace's own discipline: panels assemble one at a time as
+reasoning actually produces them, never revealed as a finished layout the instant the walk
+lands. A panel appears only once there's something meaningful in it. (Restored — this sentence
+was dropped when the upstream spec was condensed into this file, and it is the clause the
+onboarding Build-the-Plan phase rests on.)
+
 If the next question needs a panel already on screen in a different state, that panel morphs
 into its new content in place rather than being torn down and rebuilt. One panel always
 dominates; everything else is clearly supporting — a workspace where five panels compete has

@@ -1,17 +1,25 @@
-/** Inline prompt card for Pillar 4 — GTM motion (lead sources, sales motion,
- *  conditional close channel). */
+/** Inline prompt card for Pillar 4 — GTM motion: how customers find you and
+ *  how deals close.
+ *
+ *  These two decide the connector surface, which is why they're asked in
+ *  Understand Reality rather than in the interview — the ask and its
+ *  consequence render one after the other.
+ *
+ *  The conditional "closing channel" third ask is gone. Its only consumer
+ *  was a prompt-context string; `close_channel_other` had none at all, and a
+ *  question whose answer populates no field of the onboarding state is
+ *  evidence the question doesn't belong. */
 
-import { useEffect, useState } from "react";
-import type { Pillar4Response, LeadSource, SalesMotion, CloseChannel } from "@wavex-os/plugin-onboarding";
+import { useState } from "react";
+import type { Pillar4Response, LeadSource, SalesMotion } from "@wavex-os/plugin-onboarding";
 import { wavexOsOnboardingApi, ApiError } from "../../lib/api";
 import { ResponseChips } from "../ResponseChips";
-import { LEAD_SOURCES, SALES_MOTIONS, CLOSE_CHANNELS } from "../../lib/options";
+import { LEAD_SOURCES, SALES_MOTIONS } from "../../lib/options";
 import { deriveGtmProfile, displayGtmProfile } from "../../lib/gtm-profile";
 import { usePillarSuggestion } from "../../lib/use-pillar-suggestion";
 
 const LEAD_OPTS = LEAD_SOURCES.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
 const MOTION_OPTS = SALES_MOTIONS.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
-const CLOSE_OPTS = CLOSE_CHANNELS.filter((o) => o.v !== "other").map((o) => ({ value: o.v, label: o.l }));
 
 const MAX_LEAD_SOURCES = 3;
 
@@ -25,14 +33,21 @@ export function Pillar4PromptCard({ companyId, onDone }: Props) {
   const [leadsCustom, setLeadsCustom] = useState<string[]>([]);
   const [motionCanon, setMotionCanon] = useState<string[]>([]);
   const [motionCustom, setMotionCustom] = useState<string[]>([]);
-  const [closeCanon, setCloseCanon] = useState<string[]>([]);
-  const [closeCustom, setCloseCustom] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Inference-grounded suggestions from /pillar/4/suggest. Pre-fill the
   // primary lead source + sales motion when Claude has a confident pick;
   // operator can still add / remove freely. lead_sources is a ranked array.
+  // NO AUTO-SELECT. The suggestion is SHOWN — sparkle outline, reasoning line —
+  // and the operator clicks it.
+  //
+  // Preselecting made `ready` true with zero interaction, so one click on
+  // Continue persisted a model's guess as the operator's stated answer, and
+  // nothing recorded whether a chip was ever touched. Every downstream
+  // consumer then read it as `operator-claimed`: the placement rung, the
+  // capability graph, the claim ledger, the contradiction detector. One click
+  // is the entire difference between a claim and a guess, and it is worth it.
   const suggestion = usePillarSuggestion(4, companyId);
   const suggestedLeads = (Array.isArray(suggestion.recommended.lead_sources)
     ? (suggestion.recommended.lead_sources as unknown[]).filter((v): v is string => typeof v === "string")
@@ -41,30 +56,12 @@ export function Pillar4PromptCard({ companyId, onDone }: Props) {
     ? (suggestion.recommended.sales_motion as string)
     : null;
 
-  useEffect(() => {
-    if (!suggestion.loaded) return;
-    if (leadsCanon.length > 0 || leadsCustom.length > 0) return;
-    // Pre-fill up to the top 3 canonical leads.
-    const canonicalSet = new Set<string>(LEAD_OPTS.map((o) => o.value));
-    const initialLeads = suggestedLeads.filter((v) => canonicalSet.has(v)).slice(0, MAX_LEAD_SOURCES);
-    if (initialLeads.length > 0) setLeadsCanon(initialLeads);
-  }, [suggestion.loaded]);
-  useEffect(() => {
-    if (!suggestion.loaded) return;
-    if (motionCanon.length > 0 || motionCustom.length > 0) return;
-    if (suggestedMotion && MOTION_OPTS.some((o) => o.value === suggestedMotion)) {
-      setMotionCanon([suggestedMotion]);
-    }
-  }, [suggestion.loaded, suggestedMotion]);
 
   const motionValue = motionCustom[0] ?? motionCanon[0] ?? "";
   const motionIsCustom = motionCustom.length > 0;
-  const needsCloseChannel = motionValue === "assisted_demo" || motionValue === "high_touch_enterprise";
-  const closeValue = closeCustom[0] ?? closeCanon[0] ?? "";
-  const closeIsCustom = closeCustom.length > 0;
 
   const totalLeads = leadsCanon.length + leadsCustom.length;
-  const ready = totalLeads > 0 && !!motionValue && (!needsCloseChannel || !!closeValue);
+  const ready = totalLeads > 0 && !!motionValue;
 
   async function handleSubmit(): Promise<void> {
     if (!ready) return;
@@ -83,10 +80,6 @@ export function Pillar4PromptCard({ companyId, onDone }: Props) {
         lead_source_other: hasCustomLeads ? leadsCustom.join(", ") : undefined,
         sales_motion: (motionIsCustom ? "other" : motionValue) as SalesMotion,
         sales_motion_other: motionIsCustom ? motionValue : undefined,
-        close_channel: needsCloseChannel
-          ? ((closeIsCustom ? "other" : closeValue) as CloseChannel)
-          : undefined,
-        close_channel_other: needsCloseChannel && closeIsCustom ? closeValue : undefined,
       });
       onDone(result.response);
     } catch (e) {
@@ -143,31 +136,13 @@ export function Pillar4PromptCard({ companyId, onDone }: Props) {
           customValues={motionCustom}
           allowCustom
           customLabel="Other motion"
-          onChange={(v) => { setMotionCanon(v); setCloseCanon([]); setCloseCustom([]); }}
-          onCustomChange={(v) => { setMotionCustom(v); setCloseCanon([]); setCloseCustom([]); }}
+          onChange={setMotionCanon}
+          onCustomChange={setMotionCustom}
           disabled={submitting}
           suggestedValues={suggestedMotion ? [suggestedMotion as typeof MOTION_OPTS[number]["value"]] : []}
         />
       </div>
 
-      {needsCloseChannel && (
-        <div>
-          <div style={{ fontSize: 11, fontWeight: 600, marginBottom: "0.35rem", color: "var(--text-dim)" }}>
-            Closing channel
-          </div>
-          <ResponseChips
-            mode="single"
-            options={CLOSE_OPTS}
-            values={closeCanon}
-            customValues={closeCustom}
-            allowCustom
-            customLabel="Other channel"
-            onChange={setCloseCanon}
-            onCustomChange={setCloseCustom}
-            disabled={submitting}
-          />
-        </div>
-      )}
 
       {/* Live GTM profile preview — derives the operator's go-to-market
        *  shape from lead_sources + sales_motion and names the primary

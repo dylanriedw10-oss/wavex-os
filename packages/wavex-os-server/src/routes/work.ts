@@ -21,6 +21,19 @@ import {
 } from "../work/store.js";
 import { seedWork } from "../work/seed.js";
 import { runCycle } from "../work/cycle.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { getOnboardingDir } from "../state-bridge.js";
+
+/** Is the plan locked (approve-organization stamped the manifest)? */
+async function planLocked(companyId: string): Promise<boolean> {
+  try {
+    const raw = await readFile(join(getOnboardingDir(companyId), "company.manifest.json"), "utf8");
+    return typeof (JSON.parse(raw) as { plan_locked_at?: string }).plan_locked_at === "string";
+  } catch {
+    return false;
+  }
+}
 
 const goalSchema = z.object({
   title: z.string().min(1).max(200),
@@ -101,6 +114,19 @@ export function registerWorkRoutes(app: FastifyInstance): void {
     if (!(await gate(companyId, "create-goal", parsed.data, reply))) return;
     const w = await readWork(companyId);
     if (!w) return reply.status(503).send({ ok: false, error: "runtime not started — seed first" });
+    // The plan lock: THE goal (and the KPIs) are fixed at approval. An
+    // operator may still add auxiliary goals — the lock protects the plan's
+    // anchors from being eclipsed, not operator autonomy. Eclipsing = a new
+    // goal whose title collides with a plan-sourced goal.
+    if (await planLocked(companyId)) {
+      const planTitles = new Set(w.goals.filter((g) => g.source !== "operator").map((g) => g.title.toLowerCase()));
+      if (planTitles.has(parsed.data.title.toLowerCase())) {
+        return reply.status(409).send({
+          ok: false,
+          error: "the plan's goal is locked — revise the checklist (tasks), not the goal",
+        });
+      }
+    }
     const goal = {
       id: newId("goal"), title: parsed.data.title, description: parsed.data.description ?? "",
       status: "active" as const, source: "operator" as const, createdAt: new Date().toISOString(),

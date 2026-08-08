@@ -20,6 +20,15 @@ import {
   buildNode, capabilitiesOf, childrenOf, loadTreeCtx, childId,
 } from "../org/nodes.js";
 import { runWalk, getWalk } from "../org/walk.js";
+import { isStated, goalTitle, UNSTATED } from "../lib/goal-line.js";
+import { buildCapabilityGraph, type VaultConnectorState, type CapabilitySources } from "../lib/capability-model.js";
+import { readObservations, toClaims, findContradictions, findUnmapped } from "../lib/observation.js";
+import { compileTransformation } from "../lib/transformation.js";
+import { valueOfQuestions, nextQuestion } from "../lib/counterfactual.js";
+import { listConnectorStates } from "../vault/service.js";
+import { getOnboardingDir } from "../state-bridge.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   addMemory, computeGravity, computeInfluence, readOrg, seedConstitution, writeOrg,
 } from "../org/store.js";
@@ -195,10 +204,14 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     const ctx = await loadTreeCtx(app, req, companyId);
     const org = await readOrg(companyId);
     const before = org.constitution.length;
+    // `global_goals` is the ONE constitution category onboarding populates,
+    // and it is law the whole fleet reads. Same rule as everywhere else: a
+    // band that stood in for a goal nobody gave cannot be written here as
+    // though it were chosen.
     seedConstitution(
       org,
-      ctx.goal?.target != null
-        ? `${ctx.goal.metric ?? "goal"}: ${ctx.goal.current?.toLocaleString() ?? "?"} → ${ctx.goal.target.toLocaleString()}${ctx.goal.days ? ` in ${ctx.goal.days}d` : ""}`
+      ctx.goal
+        ? isStated(ctx.goal) ? goalTitle(ctx.goal) : `${goalTitle(ctx.goal)} · ${UNSTATED.short}`
         : null,
     );
     if (org.constitution.length !== before) await writeOrg(companyId, org);
@@ -228,6 +241,94 @@ export function registerOrgRoutes(app: FastifyInstance): void {
     return { ok: true, steps: steps.slice(-30).reverse() };
   }));
 
+  /* ---- The capability read-model ----
+   *
+   * A pure projection over artifacts that already exist. No write path, no
+   * migration, nothing stored — it answers "what can this organization do"
+   * from files and vault rows that are already there.
+   *
+   * Read-only by construction: capabilities are always derived, the same way
+   * fragility and quality are. */
+  app.get("/api/instance/:companyId/capabilities", guard(app, async (companyId) => {
+    return { ok: true, ...buildCapabilityGraph(companyId, await loadCapabilitySources(companyId)) };
+  }));
+
+  /* ---- Contradictions ----
+   *
+   * Two sources disagreeing about one belief. The highest-signal question in
+   * onboarding, and it costs nothing to generate — it falls out of having KEPT
+   * both answers instead of overwriting one. */
+  app.get("/api/instance/:companyId/reasoning/contradictions", guard(app, async (companyId) => {
+    const s = await loadCapabilitySources(companyId);
+    const observations = readObservations({
+      pillars: s.pillars, strategy: s.strategy, manifest: s.manifest,
+    });
+    const claims = toClaims(observations);
+    return {
+      ok: true, claims,
+      contradictions: findContradictions(claims),
+      // Separate on purpose: a contradiction needs the OPERATOR to decide, an
+      // unmapped value needs the PRODUCT to grow a word. Routing the second
+      // to a human is asking them to fix our schema.
+      unmapped: findUnmapped(claims),
+    };
+  }));
+
+  /* ---- The transformation ----
+   *
+   * Current capabilities, what the stated goal requires, and the feasible
+   * route between them. The target is STATED and never inferred; strategies
+   * are PROPOSED and never picked. */
+  app.get("/api/instance/:companyId/reasoning/transformation", guard(app, async (companyId) => {
+    const s = await loadCapabilitySources(companyId);
+    const graph = buildCapabilityGraph(companyId, s);
+    const g = s.strategy?.goal ?? s.manifest?.goal ?? null;
+    const goal = g?.kpiId ? { kpiId: g.kpiId, days: (g as { days?: number }).days ?? 90 } : null;
+    return { ok: true, graph, transformation: compileTransformation(graph, goal) };
+  }));
+
+  /* ---- What to ask next ----
+   *
+   * Not scored — COMPUTED. Fork the beliefs, set each plausible answer,
+   * recompile, diff. A question whose answers all produce the same
+   * organization has value zero and is never asked. */
+  app.get("/api/instance/:companyId/reasoning/questions", guard(app, async (companyId, req) => {
+    const { answerer } = (req.query ?? {}) as { answerer?: "operator" | "connector" };
+    const s = await loadCapabilitySources(companyId);
+    const ranked = valueOfQuestions(s);
+    return {
+      ok: true,
+      questions: ranked,
+      next: nextQuestion(s, answerer ? { answerer } : {}),
+      // The honest stopping condition: nothing left that would change the
+      // organization. "We finished the list" is not a reason to stop.
+      settled: ranked.every((q) => q.value === 0),
+    };
+  }));
+
   // referenced to keep the tree helpers exported-and-used from one place
   void childId;
+}
+
+/** The one loader every reasoning route shares. Reading is I/O; deriving is
+ *  pure — keeping them apart is what makes the model testable without a
+ *  filesystem. */
+async function loadCapabilitySources(companyId: string): Promise<CapabilitySources> {
+  const dir = getOnboardingDir(companyId);
+  const read = async <T>(file: string): Promise<T | null> => {
+    try { return JSON.parse(await readFile(join(dir, file), "utf8")) as T; } catch { return null; }
+  };
+  let vault: VaultConnectorState[] | null = null;
+  try {
+    vault = [...(await listConnectorStates(companyId)).values()]
+      .map((v) => ({ connectorId: v.connectorId, status: v.status as VaultConnectorState["status"] }));
+  } catch { vault = null; }
+  return {
+    pillars: await read("pillar_responses.json"),
+    manifest: await read("company.manifest.json"),
+    swarm: await read("swarm_manifest.json"),
+    workflow: await read("workflow_manifest.json"),
+    strategy: await read("strategy.json"),
+    vault,
+  };
 }

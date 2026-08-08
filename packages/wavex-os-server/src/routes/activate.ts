@@ -18,6 +18,7 @@ import { getOnboardingDir } from "../state-bridge.js";
 import { bridgeAgents, bridgeKpis } from "../bridge/finalize-bridge.js";
 import { handoffToPaperclip, rerenderBundlesForCompany } from "../bridge/paperclip-handoff.js";
 import { ignite } from "../bridge/ignition.js";
+import { igniteNative } from "../bridge/ignition-native.js";
 
 /** Paperclip is no longer the runtime (spec Rev 6). The response keeps a
  *  stub handoff record because the Materialize screen reads it
@@ -179,6 +180,7 @@ export function registerActivateRoute(app: FastifyInstance): void {
       const result = await bridgeAgents(manifest, companyId, db);
       const kpiResult = await bridgeKpis(manifest, companyId, db);
       result.kpis = kpiResult.kpis;
+      result.warnings.push(...kpiResult.warnings);
 
       // bridgeAgents mutated the manifest with template_selections (rationale
       // for each matrix pick). Persist back to disk + re-sign so the dashboard
@@ -291,7 +293,15 @@ export function registerActivateRoute(app: FastifyInstance): void {
       // ORPHAN FROM PLANNING: no goal object, no seeded roadmap, no
       // kickoff. That used to slip by silently as a soft "deferred". It
       // must not. See docs/IGNITION.md.
-      const ignition = await ignite(manifest, companyId, handoff).catch((e) => ({
+      //
+      // THE BRANCH: with a Paperclip company the 8-step bridge runs as
+      // before; without one, the NATIVE runtime ignites — seedWork writes
+      // the goal + bootstrap tasks that used to require a manual Seed click,
+      // and the returned goal_id is what keeps the orphan alarm quiet. A
+      // stock local install now ends activation with a planned fleet.
+      const ignition = await (
+        handoff.paperclipCompanyId ? ignite(manifest, companyId, handoff) : igniteNative(companyId)
+      ).catch((e) => ({
         status: "deferred" as const,
         agents_working: 0,
         workflows_queued: 0,
@@ -394,7 +404,10 @@ export function registerActivateRoute(app: FastifyInstance): void {
       })) as Awaited<ReturnType<typeof handoffToPaperclip>>;
     }
 
-    const ignition = await ignite(manifest, companyId, handoff);
+    // Same branch as activate: no Paperclip company → native ignition.
+    const ignition = handoff.paperclipCompanyId
+      ? await ignite(manifest, companyId, handoff)
+      : await igniteNative(companyId);
     return reply.send({ ok: true, ignition });
   });
 

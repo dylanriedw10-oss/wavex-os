@@ -28,7 +28,7 @@ export type PhaseKey =
   | "finalize" | "recommend_agent" | "help_chat" | "board_chat"
   | "avatar_voice" | "avatar_intro" | "avatar_memory_distill"
   | "avatar_mail_triage" | "avatar_calendar_triage" | "avatar_slack_digest"
-  | "canvas" | "task_exec" | "refinement";
+  | "canvas" | "task_exec" | "refinement" | "research";
 
 interface T2Event {
   ts_iso: string;
@@ -231,6 +231,9 @@ const DEFAULT_ETAS_MS: Partial<Record<PhaseKey, number>> = {
   canvas: 15_000,
   task_exec: 120_000,
   refinement: 60_000,
+  // The most expensive single call in onboarding: fullest context, deepest
+  // reasoning, and the operator is watching an empty canvas while it runs.
+  research: 120_000,
 };
 
 export interface PhaseEta {

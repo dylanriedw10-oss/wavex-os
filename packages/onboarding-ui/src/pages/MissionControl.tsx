@@ -43,7 +43,7 @@ function CompanyPicker() {
           <option key={c.id} value={c.id}>{c.name}</option>
         ))}
       </select>
-      <Link to="/onboarding-chat" style={{ fontSize: 12, padding: "8px", display: "inline-flex", alignItems: "center", minHeight: 44, minWidth: 44 }}>+ New</Link>
+      <Link to="/build" style={{ fontSize: 12, padding: "8px", display: "inline-flex", alignItems: "center", minHeight: 44, minWidth: 44 }}>+ New</Link>
     </div>
   );
 }
@@ -77,7 +77,7 @@ export default function MissionControl() {
   });
   const hasZeroCompanies = companiesQ.isSuccess && (companiesQ.data?.companies ?? []).length === 0;
   if (!companyId && hasZeroCompanies) {
-    return <Navigate to="/onboarding-chat" replace />;
+    return <Navigate to="/build" replace />;
   }
 
   // Phase 7-B — first-run walkthrough for Mission Control.
@@ -148,7 +148,7 @@ export default function MissionControl() {
               <strong>No company selected.</strong>{" "}
               <span className="text-dim">Pick one from the dropdown or start onboarding for a new one.</span>
             </div>
-            <Link to="/onboarding-chat" style={{ display: "inline-block", padding: "12px 20px", background: "var(--accent)", color: "#08221d", borderRadius: "var(--radius)", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>Start onboarding →</Link>
+            <Link to="/build" style={{ display: "inline-block", padding: "12px 20px", background: "var(--accent)", color: "#08221d", borderRadius: "var(--radius)", fontWeight: 600, fontSize: 14, textDecoration: "none" }}>Start onboarding →</Link>
           </div>
         )}
 

@@ -4,7 +4,6 @@ import { z } from "zod";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   generateConnectorManifest,
-  generateSwarmManifest,
   generateWorkflowManifest,
   loadConnectorManifest, loadSwarmManifest, loadPillarResponses,
   assembleCompanyManifest,
@@ -17,107 +16,21 @@ import { listConnections } from "@wavex-os/composio-shim";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
 import { withTokenAccounting } from "../lib/token-accounting.js";
 import { BudgetExhaustedError } from "../lib/token-budget.js";
-import { injectKernelSlots } from "../bridge/kernel-slots.js";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import yaml from "js-yaml";
 import { getOnboardingDir } from "../state-bridge.js";
+import {
+  generateSwarmWithOverlays, loadFreshWorkflowManifest,
+  readScope, writeScope, type ScopeRecord,
+} from "../lib/swarm-overlays.js";
+import { synthesizeGoal } from "../lib/goal-synthesis.js";
+import { placeOperator } from "../lib/placement.js";
+import { readStrategy, writeStrategy, type Strategy } from "../lib/strategy.js";
+import { canonicalKpiId, CANONICAL_KPI_ORDER } from "../lib/kpi-registry.js";
 
-/** Re-persist the swarm manifest after mutation. The vendored generator
- *  writes the file internally; this overrides with the kernel-injected
- *  version so subsequent disk reads (loadSwarmManifest, finalize-bridge)
- *  see the canonical shape. */
-async function persistSwarmManifest(companyId: string, swarm: unknown): Promise<void> {
-  const dir = getOnboardingDir(companyId);
-  await writeFile(join(dir, "swarm_manifest.json"), JSON.stringify(swarm, null, 2), "utf8");
-  await writeFile(join(dir, "swarm_manifest.yaml"), yaml.dump(swarm), "utf8");
-}
-
-/** Sub-fleet scope record. When the operator chooses a focused team (e.g.
- *  marketing + sales only), we persist their selected departments and the
- *  swarm-manifest route parks every chief + L·IV sub-agent that lives
- *  outside that set. CEO + CoS always remain active. */
-interface ScopeRecord {
-  /** Canonical departments to keep active. */
-  departments: string[];
-  /** Free-text divisions the operator entered (used for the parked-reason
-   *  message). */
-  custom_labels?: string[];
-  mode: "full" | "focused";
-  set_at: string;
-}
-
-async function readScope(companyId: string): Promise<ScopeRecord | null> {
-  const { readFile } = await import("node:fs/promises");
-  const path = join(getOnboardingDir(companyId), "scope.json");
-  try {
-    const raw = await readFile(path, "utf8");
-    return JSON.parse(raw) as ScopeRecord;
-  } catch {
-    return null;
-  }
-}
-
-async function writeScope(companyId: string, scope: ScopeRecord): Promise<void> {
-  const { mkdir } = await import("node:fs/promises");
-  const dir = getOnboardingDir(companyId);
-  await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "scope.json"), JSON.stringify(scope, null, 2), "utf8");
-}
-
-/** Apply scope filter to a swarm manifest in-place. Non-scoped chiefs +
- *  their reports become `parked` with an unpark_condition the operator
- *  can flip from Mission Control. CEO + chief-of-staff are sacrosanct.
- *
- *  Custom-only fallback: when scope.mode === "focused" with no canonical
- *  departments selected (operator only typed custom labels like "Legal"
- *  or "HR"), we map the request to Operations — so they get COO + ops
- *  sub-agents active rather than a hollow CEO-only fleet. The custom
- *  labels stay persisted for future template provisioning. */
-function applyScopeFilter(
-  swarm: { agents: Record<string, { department?: string; status?: string; unpark_condition?: string | null; reason?: string | null; reports_to?: string | null }> },
-  scope: ScopeRecord,
-): { parked: number; mappedCustomToOps: boolean } {
-  if (scope.mode === "full") return { parked: 0, mappedCustomToOps: false };
-
-  const customOnly = scope.departments.length === 0 && (scope.custom_labels?.length ?? 0) > 0;
-  const effectiveDepartments = customOnly ? ["ops"] : scope.departments;
-  const allowed = new Set([...effectiveDepartments, "ceo"]); // CEO always
-
-  const reasonSuffix = customOnly
-    ? `custom-only scope mapped to Operations (custom labels: ${scope.custom_labels?.join(", ") ?? ""})`
-    : `outside requested scope (${effectiveDepartments.join(", ") || "focused team"})`;
-
-  let parked = 0;
-  for (const [slot, a] of Object.entries(swarm.agents)) {
-    if (slot === "ceo.orchestrator" || slot === "ceo.chief-of-staff") continue;
-    if (a.department && !allowed.has(a.department)) {
-      if (a.status === "active" || a.status === "standby") {
-        a.status = "parked";
-        a.unpark_condition = "operator_unpark_from_mission_control";
-        a.reason = reasonSuffix;
-        parked += 1;
-      }
-    }
-  }
-  return { parked, mappedCustomToOps: customOnly };
-}
-
-/** Load workflow_manifest.json if it exists AND was written within
- *  freshnessMs ago. Used by finalize to consume the chat-first shell's
- *  prefetched T2 workflow instead of regenerating deterministically. */
-async function loadFreshWorkflowManifest(companyId: string, freshnessMs: number): Promise<WorkflowManifest | null> {
-  const { readFile, stat } = await import("node:fs/promises");
-  const path = join(getOnboardingDir(companyId), "workflow_manifest.json");
-  try {
-    const s = await stat(path);
-    if (Date.now() - s.mtimeMs > freshnessMs) return null;
-    const raw = await readFile(path, "utf8");
-    return JSON.parse(raw) as WorkflowManifest;
-  } catch {
-    return null;
-  }
-}
+/* Scope + swarm-overlay helpers moved to ../lib/swarm-overlays.ts so plan
+ * assembly runs the identical pipeline. Goal synthesis moved to
+ * ../lib/goal-synthesis.ts for the same reason. */
 
 const generateConnectorSchema = z.object({
   companyId: z.string().min(1),
@@ -273,9 +186,26 @@ export function registerPhaseRoutes(app: FastifyInstance): void {
     }
   });
 
-  // Persist sub-fleet scope. Body: { companyId, mode: "full"|"focused",
-  // departments: string[], custom_labels?: string[] }. Read by the swarm-
-  // manifest POST handler to park non-scoped chiefs.
+  /* ---- Department parking ----
+   *
+   * Body: { companyId, mode, departments: string[], custom_labels? }, where
+   * `departments` is what the operator KEPT. Everything outside the set is
+   * parked with an unpark condition they can flip later from Mission
+   * Control; nothing here promotes an agent the selection matrix parked.
+   *
+   * The record used to be written and nothing else, because it was answered
+   * in the interview — long before the swarm existed — so the generator read
+   * it on the way past. Parking now happens at REVIEW, over a plan the
+   * operator can see, and by then the swarm is already on disk: writing the
+   * record alone would leave the operator looking at departments struck out
+   * on screen and a fleet that never heard about it.
+   *
+   * So the swarm is REGENERATED here rather than patched. Regeneration is
+   * deterministic (`skipInference`) and idempotent, and it means the parked
+   * set is recomputed from the current answer every time — patching in place
+   * could only ever add parks, so an operator who confirmed, hit a failure,
+   * and retried with fewer departments struck out would carry the earlier
+   * ones forever. */
   const scopeSchema = z.object({
     companyId: z.string().min(1),
     mode: z.enum(["full", "focused"]),
@@ -294,7 +224,25 @@ export function registerPhaseRoutes(app: FastifyInstance): void {
       set_at: new Date().toISOString(),
     };
     await writeScope(parsed.data.companyId, scope);
-    return { ok: true, scope };
+
+    // Re-apply against the fleet that exists. No connector manifest means the
+    // swarm has not been generated yet — the record is enough, and the
+    // generator will read it when it runs.
+    const connector = await loadConnectorManifest(parsed.data.companyId).catch(() => null);
+    if (!connector) return { ok: true, scope, applied: false, warnings: [] };
+    try {
+      const result = await generateSwarmWithOverlays(parsed.data.companyId, {
+        skipInference: true, connectorManifest: connector,
+      });
+      return { ok: true, scope, applied: true, warnings: result.warnings };
+    } catch (e) {
+      // The record IS written; say plainly that the fleet has not caught up
+      // rather than reporting a success the manifest does not show.
+      return reply.status(500).send({
+        ok: false, scope, applied: false,
+        error: `scope recorded but the fleet could not be regenerated: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
   });
   app.get("/wavex-os/onboarding/scope", async (req, reply) => {
     if (!gateBoard(req, reply)) return;
@@ -305,6 +253,67 @@ export function registerPhaseRoutes(app: FastifyInstance): void {
     return { ok: true, scope };
   });
 
+  /* ---- Strategy: the operator's STATED goal ----
+   *
+   * The only source of the self-prompting loop's fixed half. Before this
+   * route existed the goal came from a revenue BRACKET mapped to hardcoded
+   * numbers, and that guess became the approved plan, the seeded work goal,
+   * and the fleet's founding directive — identical for two companies eight
+   * times apart in size. A goal is intent; it is stated or it is absent.
+   *
+   * `kpiId` is validated against the canonical vocabulary so operator copy
+   * and system identifiers cannot drift the way the stage and sales-motion
+   * enums did. */
+  const strategySchema = z.object({
+    companyId: z.string().min(1),
+    goal: z.object({
+      kpiId: z.string().min(1),
+      current: z.number().finite().min(0),
+      target: z.number().finite().min(0),
+      days: z.number().int().min(1).max(3650),
+    }),
+    secondaryKpis: z.array(z.string()).max(2).optional(),
+    bottleneck: z.string().max(200).nullable().optional(),
+    /** False only where the operator explicitly declined and a band stood in. */
+    stated: z.boolean().optional(),
+  }).strict();
+
+  app.post("/wavex-os/onboarding/strategy", async (req, reply) => {
+    if (!gateBoard(req, reply)) return;
+    const parsed = strategySchema.safeParse(req.body);
+    if (!parsed.success) return reply.status(400).send({ error: "validation failed", issues: parsed.error.issues });
+    assertCompanyAccess(authReq(req), parsed.data.companyId);
+
+    const kpiId = canonicalKpiId(parsed.data.goal.kpiId);
+    if (!CANONICAL_KPI_ORDER.includes(kpiId)) {
+      // Reject rather than coerce: a goal measured by a KPI the runtime
+      // cannot name is a goal nothing will ever measure against.
+      return reply.status(400).send({
+        error: `unknown kpiId "${parsed.data.goal.kpiId}"`,
+        allowed: CANONICAL_KPI_ORDER,
+      });
+    }
+
+    const strategy: Strategy = {
+      v: 1,
+      goal: { ...parsed.data.goal, kpiId },
+      secondaryKpis: (parsed.data.secondaryKpis ?? []).map(canonicalKpiId),
+      bottleneck: parsed.data.bottleneck?.trim() || null,
+      stated: parsed.data.stated ?? true,
+      setAt: new Date().toISOString(),
+    };
+    await writeStrategy(parsed.data.companyId, strategy);
+    return { ok: true, strategy };
+  });
+
+  app.get("/wavex-os/onboarding/strategy", async (req, reply) => {
+    if (!gateBoard(req, reply)) return;
+    const { companyId } = (req.query ?? {}) as { companyId?: string };
+    if (!companyId) return reply.status(400).send({ error: "companyId required" });
+    assertCompanyAccess(authReq(req), companyId);
+    return { ok: true, strategy: await readStrategy(companyId) };
+  });
+
   app.post("/wavex-os/onboarding/swarm-manifest", async (req, reply) => {
     if (!gateBoard(req, reply)) return;
     const parsed = generateSwarmSchema.safeParse(req.body);
@@ -312,68 +321,16 @@ export function registerPhaseRoutes(app: FastifyInstance): void {
     assertCompanyAccess(authReq(req), parsed.data.companyId);
     const connector = await loadConnectorManifest(parsed.data.companyId).catch(() => null);
     if (!connector) return reply.status(409).send({ error: "connector manifest not generated" });
-    const responses = await loadPillarResponses(parsed.data.companyId);
     try {
+      // The whole pipeline (vendored generation → kernel slots → scope
+      // filter / full-org unpark → re-persist) lives in lib/swarm-overlays
+      // so plan assembly runs the identical code path.
       return await withTokenAccounting(parsed.data.companyId, "swarm_manifest", async () => {
-        const result = await generateSwarmManifest({
-          companyId: parsed.data.companyId,
-          responses,
-          connectorManifest: connector,
+        const result = await generateSwarmWithOverlays(parsed.data.companyId, {
           skipInference: parsed.data.skipInference,
+          connectorManifest: connector,
         });
-        // Inject kernel slots (Chief of Staff, etc.) so they appear in the
-        // Phase 3 org chart AND get bridged to DB on activate. The vendored
-        // generator persists swarm_manifest.{json,yaml} internally; we
-        // re-write after mutation so the on-disk file matches.
-        let mutated = injectKernelSlots(result.manifest);
-
-        // Sub-fleet scope filter — if the operator chose a focused team
-        // (marketing+sales only, etc.), park non-scoped chiefs + their
-        // reports. CEO + chief-of-staff stay active regardless.
-        const scope = await readScope(parsed.data.companyId);
-        let parked = 0;
-        let mappedCustomToOps = false;
-        let unparkedForFull = 0;
-        if (scope && scope.mode === "focused") {
-          ({ parked, mappedCustomToOps } = applyScopeFilter(
-            result.manifest as unknown as Parameters<typeof applyScopeFilter>[0],
-            scope,
-          ));
-          if (parked > 0) mutated = true;
-        } else if (!scope || scope.mode === "full") {
-          // Full-org intent: the matrix selector parks agents the vendor
-          // judges "not relevant for your stage", but the operator's
-          // explicit choice was "give me the whole org." Promote every
-          // parked agent to active so the count matches the action.
-          // "disabled" stays as-is — vendor flagged those as structurally
-          // not relevant, which is a stronger signal than stage-fit.
-          const swarmAgents = (result.manifest as unknown as {
-            agents: Record<string, { status: string; reason?: string | null; unpark_condition?: string | null }>;
-          }).agents;
-          for (const entry of Object.values(swarmAgents)) {
-            if (entry.status === "parked") {
-              entry.status = "active";
-              // Clear vendor-attached parking fields so the entry is a
-              // clean "active" record after the override.
-              if ("unpark_condition" in entry) delete entry.unpark_condition;
-              unparkedForFull += 1;
-            }
-          }
-          if (unparkedForFull > 0) mutated = true;
-        }
-
-        if (mutated) {
-          await persistSwarmManifest(parsed.data.companyId, result.manifest);
-        }
-        const warnings = [...result.warnings];
-        if (mappedCustomToOps) {
-          warnings.push(`scope=focused with only custom labels [${scope?.custom_labels?.join(", ") ?? ""}] — mapped to Operations (COO + sub-agents active). ${parked} non-ops agents parked.`);
-        } else if (parked > 0) {
-          warnings.push(`scope=focused: parked ${parked} agents outside [${scope?.departments.join(", ")}]`);
-        } else if (unparkedForFull > 0) {
-          warnings.push(`scope=full: promoted ${unparkedForFull} matrix-parked agents to active to match operator's full-org choice.`);
-        }
-        return { ok: true, manifest: result.manifest, source: result.source, warnings };
+        return { ok: true, manifest: result.manifest, source: result.source, warnings: result.warnings };
       });
     } catch (e) {
       return bodyError(reply, e);
@@ -502,7 +459,7 @@ export function registerPhaseRoutes(app: FastifyInstance): void {
         const m = result.manifest as {
           finalized_at?: string;
           signed_at?: string;
-          goal?: { kpiId: string; current: number; target: number; days: number };
+          goal?: { kpiId: string; current: number; target: number; days: number; stated?: boolean };
           pillar_responses?: {
             pillar_1?: { has_product?: boolean };
             pillar_3?: { product_state?: string; stage?: string };
@@ -514,36 +471,26 @@ export function registerPhaseRoutes(app: FastifyInstance): void {
           m.signed_at = m.finalized_at;
           manifestMutated = true;
         }
-        // Compute a sensible goal from Pillar 3's stage. MRR is the
-        // default kpiId — it's the first row in every kpi_registry today
-        // and matches what KpiBoard renders as the headline. Numbers come
-        // from STAGE_BASELINES in stage-baselines.ts (kept in sync here
-        // because vendor/wavex-os/ is frozen and can't import from the UI).
+        // Compute a sensible goal from Pillar 3's stage — the shared
+        // synthesizeGoal (lib/goal-synthesis.ts), so the roadmap step plan
+        // assembly showed the operator is the goal finalize stamps here.
         if (!m.goal) {
-          const stage = m.pillar_responses?.pillar_3?.stage ?? "unknown";
-          const productState = m.pillar_responses?.pillar_3?.product_state ?? "unknown";
-          const isPreProduct = productState === "idea_only" || productState === "prototype_mvp";
-          // [current, target] pairs in dollars; both halve-then-triple the
-          // typical stage band so the "30% growth over 90d" framing reads
-          // as ambitious-but-real to a customer at the median of their band.
-          const goalsByStage: Record<string, { current: number; target: number }> = {
-            less_than_10k_mrr:   { current: 5_000,     target: 15_000 },
-            "0_10k_mrr":         { current: 5_000,     target: 15_000 },
-            "10k_100k_mrr":      { current: 45_000,    target: 100_000 },
-            "100k_1m_mrr":       { current: 400_000,   target: 1_000_000 },
-            "1m_10m_mrr":        { current: 2_500_000, target: 5_000_000 },
-            more_than_1m_mrr:    { current: 2_500_000, target: 5_000_000 },
-            "10m_plus_mrr":      { current: 12_000_000, target: 24_000_000 },
-          };
-          const band = isPreProduct
-            ? { current: 0, target: 5_000 }
-            : goalsByStage[stage] ?? { current: 5_000, target: 15_000 };
-          m.goal = {
-            kpiId: "monthly_recurring_revenue",
-            current: band.current,
-            target: band.target,
-            days: 90,
-          };
+          // Placement must come from the SAME authority plan assembly used,
+          // or the goal stamped into the signed manifest silently diverges
+          // from the roadmap the operator actually reviewed — which is the
+          // exact bug class lib/placement.ts exists to close.
+          // The operator's OWN goal if they stated one; the band only if
+          // they didn't. Same authority the roadmap step used, so the signed
+          // manifest cannot stamp a different goal than the one reviewed.
+          // The whole record. `stated` is a sibling of `goal`, and passing
+          // `.goal` alone stamped the SIGNED manifest with `stated: true` for
+          // an operator who explicitly declined — the one place that lie is
+          // permanent.
+          m.goal = synthesizeGoal(
+            m.pillar_responses?.pillar_3,
+            placeOperator(m.pillar_responses ?? {}).rung,
+            await readStrategy(parsed.data.companyId),
+          );
           manifestMutated = true;
         }
       } catch { /* goal/signed_at injection is best-effort */ }

@@ -148,12 +148,12 @@ export function Pillar4({ companyId, initial, onComplete }: Props) {
           <div style={{
             marginTop: "0.75rem",
             padding: "0.75rem",
-            border: "1px solid #b88dff",
+            border: "1px solid var(--mind)",
             background: "var(--bg)",
             borderRadius: 4,
             fontSize: 12,
           }}>
-            <div style={{ color: "#b88dff", fontWeight: 600, marginBottom: 4 }}>
+            <div style={{ color: "var(--mind)", fontWeight: 600, marginBottom: 4 }}>
               ✦ Looks like you're {profileDisplay.name}
             </div>
             <div className="text-dim">{profileDisplay.primary_agents}</div>

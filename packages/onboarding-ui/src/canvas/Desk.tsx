@@ -17,10 +17,20 @@ import type { CSSProperties, ReactNode } from "react";
 import { Ic } from "./icons";
 import { Medallion, ago, displayName } from "./OrgFlywheel";
 import { TASK_TONE } from "./WorkPanel";
+import { ClampedList } from "./ClampedList";
+import { regionBudget, useMeasuredHeight } from "./layout";
 import type {
   OrgChildRef, OrgMemoryEntry, OrgNode, OrgWalkStep,
   WorkDeliverable, WorkRunEvent, WorkTask,
 } from "./contract";
+
+/** A region's own label + footer (spec Rev 10). Every other dimension the
+ *  desk uses is measured, not guessed. */
+const REGION_LABEL_PX = 64;
+/** Each sidebar card's label and "view all" footer. */
+const SIDE_CARD_CHROME_PX = 74;
+/** One Working-On row: medallion + two lines of text. */
+const ROW_PX = 69;
 
 const CARD: CSSProperties = { padding: "var(--space-5) var(--space-6)" };
 const LABEL: CSSProperties = {
@@ -134,6 +144,13 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
   onOpenLens: (lens: "work" | "investigations" | "learned") => void;
 }) {
   const byId = new Map(allTasks.map((t) => [t.id, t]));
+  // The sidebar's three cards share the column: each gets its slice of the
+  // instrument budget, so a short window thins all three evenly rather than
+  // letting the first card eat the space and push the rest off-screen.
+  const [workingRef, workingH] = useMeasuredHeight();
+  const [sideRef, sideH] = useMeasuredHeight();
+  const cards = (memory.length > 0 ? 1 : 0) + (deliverables.length > 0 ? 1 : 0) + 1;
+  const sidebarPx = regionBudget(sideH / Math.max(1, cards), SIDE_CARD_CHROME_PX);
   // L2 per row: the chevron is honest — a row expands to the full brief
   // and its latest deliverable state. Nothing navigates away.
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
@@ -198,10 +215,13 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
   );
 
   return (
-    <div style={{ display: "flex", gap: "var(--space-4)", alignItems: "flex-start", flexWrap: "wrap", marginTop: "var(--space-4)" }}>
+    // Rev 10: the desk fills its zone and its two columns share it. No
+    // marginTop — `height: 100%` doesn't account for margin, and the excess
+    // becomes silent clipping.
+    <div style={{ height: "100%", minHeight: 0, display: "flex", gap: "var(--space-4)", alignItems: "stretch", paddingTop: "var(--space-4)", boxSizing: "border-box" }}>
       {/* ---------------- main column: the work ---------------- */}
-      <div style={{ flex: "1 1 480px", minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
-        <div>
+      <div style={{ flex: "1 1 480px", minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+        <div style={{ flexShrink: 0 }}>
           <div className="text-dim" style={LABEL}>Currently working</div>
           <div className="cv-paper" style={{ ...CARD, display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
             {running ? (
@@ -247,12 +267,26 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
         </div>
 
         {seeded && (
-        <div>
+        <div ref={workingRef} style={{ flex: 1, minHeight: 0, overflow: "hidden" }}>
           <div className="text-dim" style={LABEL}>Working on</div>
           {mine.length === 0 && <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>Nothing queued for this desk.</span>}
-          {open.length > 0 && (
+          {/* The density gradient made real (Rev 10): when the window can't
+              seat even one row, the region folds to its counted line rather
+              than forcing a row that would overflow the zone. */}
+          {open.length > 0 && workingH > 0 && workingH - REGION_LABEL_PX < ROW_PX && (
+            <button onClick={() => onOpenLens("work")}
+              style={{ all: "unset", cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-dim)", minHeight: 24 }}>
+              {open.length} open task{open.length === 1 ? "" : "s"} · View all work →
+            </button>
+          )}
+          {open.length > 0 && !(workingH > 0 && workingH - REGION_LABEL_PX < ROW_PX) && (
             <div className="cv-paper" style={{ padding: "0 var(--space-4)" }}>
-              {open.slice(0, 6).map((t, i) => {
+              {/* The fit law (spec Rev 10): rows are budgeted by the window,
+                  not by a constant. Overflow descends to the Work lens. */}
+              <ClampedList items={open} rowPx={ROW_PX} availPx={workingH} reservedPx={REGION_LABEL_PX} min={1} max={8}
+                onMore={() => onOpenLens("work")}
+                moreLabel={(hidden) => `+${hidden} more in Work →`}
+                render={(t, i) => {
                 const waits = waitingOn(t);
                 const expanded = openRows.has(t.id);
                 const latest = myDeliverables.find((d) => d.taskId === t.id) ?? null;
@@ -302,7 +336,7 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
                     )}
                   </div>
                 );
-              })}
+              }} />
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderTop: "1px solid rgba(0,0,0,0.05)" }}>
                 <button onClick={() => onOpenLens("work")}
                   style={{ all: "unset", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
@@ -322,29 +356,29 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
       </div>
 
       {/* ---------------- sidebar: the desk's record ---------------- */}
-      <div style={{ flex: "0 1 320px", minWidth: 260, display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      <div ref={sideRef} style={{ flex: "0 1 320px", minWidth: 260, minHeight: 0, display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
         {feed.length > 0 && sideCard("Recent activity", feed.length,
-          feed.slice(0, 4).map((f) => (
+          <ClampedList items={feed} rowPx={22} availPx={sidebarPx} min={0} max={6} countInHeader render={(f) => (
             <div key={f.key} style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
               <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: f.tone, flexShrink: 0, alignSelf: "center" }} />
               <span style={{ flex: 1, minWidth: 0, fontSize: "var(--text-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.text}</span>
               <span className="text-dim" style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>{ago(f.ts)}</span>
             </div>
-          )),
+          )} />,
           { text: "View investigations", onClick: () => onOpenLens("investigations") },
         )}
         {memory.length > 0 && sideCard("Memory", memory.length,
-          memory.slice(0, 3).map((m) => (
+          <ClampedList items={memory} rowPx={22} availPx={sidebarPx} min={0} max={5} countInHeader render={(m) => (
             <div key={m.id} style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0 }}>
               <span aria-hidden style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--mind)", flexShrink: 0, alignSelf: "center" }} />
               <span style={{ flex: 1, minWidth: 0, fontSize: "var(--text-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.claim}</span>
               <span className="text-dim" style={{ fontSize: "var(--text-xs)", whiteSpace: "nowrap" }}>{ago(m.derivedAt)}</span>
             </div>
-          )),
+          )} />,
           { text: "View all memories", onClick: () => onOpenLens("learned") },
         )}
         {myDeliverables.length > 0 && sideCard("Artifacts", myDeliverables.length,
-          myDeliverables.slice(0, 3).map((d) => {
+          <ClampedList items={myDeliverables} rowPx={22} availPx={sidebarPx} min={0} max={5} countInHeader render={(d) => {
             const t = byId.get(d.taskId);
             const tone = d.review === "approved" ? "var(--good)" : d.review === "changes_requested" ? "var(--attend)" : "var(--mind)";
             return (
@@ -358,7 +392,7 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
                 </span>
               </div>
             );
-          }),
+          }} />,
           { text: "Review in Work", onClick: () => onOpenLens("work") },
         )}
       </div>

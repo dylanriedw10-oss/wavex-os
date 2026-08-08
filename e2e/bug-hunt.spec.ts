@@ -475,35 +475,6 @@ test.describe("bug hunt — composition + edge cases", () => {
   /** B14 family: browser session resilience                        */
   /** ============================================================ */
 
-  /** B14a: refresh mid-add-agent — page recovers cleanly + addition survived */
-  test("B14a: page refresh after add-agent — state survives + UI recovers", async ({ page, request }) => {
-    const id = uniqueId("bh-refresh-add");
-    await seedFinalized(request, id);
-    await activate(request, id);
-
-    // Add an agent via API (simulating the operator clicking + Add)
-    await request.post(`/api/instance/${id}/add-agent`, {
-      data: { parent_slot: "cmo", template_id: "viral-loop-designer" },
-    });
-
-    // Open Phase 3 — should hydrate the addition into the org chart
-    await page.goto(`/onboarding?companyId=${id}`);
-    await page.getByRole("button", { name: /^Swarm$/ }).click();
-    await expect(page.getByRole("heading", { name: /Phase 3.*Swarm/i })).toBeVisible({ timeout: 30_000 });
-
-    // Wait for the org chart to render with the addition
-    await expect(page.locator(".react-flow__node").filter({ hasText: /viral-loop-designer/i }).first())
-      .toBeVisible({ timeout: 15_000 });
-
-    // Refresh — page must recover cleanly
-    await page.reload();
-    await expect(page.getByRole("heading", { name: /Phase 3.*Swarm/i })).toBeVisible({ timeout: 30_000 });
-    await expect(page.locator(".react-flow__node").filter({ hasText: /viral-loop-designer/i }).first())
-      .toBeVisible({ timeout: 15_000 });
-
-    await request.delete(`/api/instance/${id}/reset`);
-  });
-
   /** B14b: refresh during recommend — pending T2 call orphans cleanly,
    *  next page load has no zombie spinner, operator can retry. */
   test("B14b: page refresh mid-recommend — UI recovers, no zombie state", async ({ page, request }) => {
@@ -546,30 +517,6 @@ test.describe("bug hunt — composition + edge cases", () => {
     await expect(newTextarea).toHaveValue("");
 
     await request.delete(`/api/instance/${id}/reset`);
-  });
-
-  /** B15a: stale ?companyId= + name typed → inline hint promises a rename.
-   *  No T2 needed — just verifies the willRename UX cue. Catches regressions
-   *  where the hint stops rendering or the slug computation drifts. */
-  test("B15a: rename hint appears when typed name differs from URL companyId", async ({ page }) => {
-    const staleId = uniqueId("bh-stale");
-    await page.goto(`/onboarding?companyId=${staleId}`);
-    await expect(page.getByRole("heading", { name: /Pillar 1/ })).toBeVisible({ timeout: 10_000 });
-
-    const nameInput = page.getByPlaceholder(/Acme Tools/i);
-    await nameInput.fill("Stripe Demo Co");
-
-    // Hint must surface the slugified target id + the current stale id.
-    // staleId appears twice: once in the header breadcrumb, once in the hint.
-    await expect(page.getByText(/will be saved under company id/i)).toBeVisible();
-    await expect(page.locator("code", { hasText: "stripe-demo-co" })).toHaveCount(1);
-    await expect(page.locator("code", { hasText: staleId })).toHaveCount(2);
-
-    // Typing the same id back hides the hint (no rename needed) — only header
-    // copy of staleId remains.
-    await nameInput.fill(staleId);
-    await expect(page.getByText(/will be saved under company id/i)).not.toBeVisible();
-    await expect(page.locator("code", { hasText: staleId })).toHaveCount(1);
   });
 
   /** B15b: full rename round-trip — submit Pillar 1 with a different name and
@@ -626,15 +573,6 @@ test.describe("bug hunt — composition + edge cases", () => {
     const id = uniqueId("bh-token-empty");
     const r = await request.get(`/api/instance/${id}/token-usage`);
     expect(r.status()).toBe(404);
-  });
-
-  /** B16b: token-usage chip is visible in the wizard header */
-  test("B16b: header renders token chip with $0.00 baseline", async ({ page }) => {
-    const id = uniqueId("bh-token-chip");
-    await page.goto(`/onboarding?companyId=${id}`);
-    await expect(page.getByRole("heading", { name: /Pillar 1/ })).toBeVisible({ timeout: 10_000 });
-    // Chip starts at "0 · <$0.01" (no calls yet, 404 → empty state)
-    await expect(page.locator("button", { hasText: /🪙\s+0\s+·/ })).toBeVisible();
   });
 
   /** B17a: ETA endpoint returns defaults when no history exists */

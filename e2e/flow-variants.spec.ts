@@ -1,9 +1,23 @@
-/** Playwright e2e — 10 flow variants covering reset, activate, navigation,
- *  and the freshly-rebuilt dashboard surfaces.
+/** Playwright e2e — activate → DB → FleetGraph, plus Mission Control's
+ *  empty state.
  *
- *  These tests use the API to seed state where a full wizard walk would be
- *  too slow, then exercise the UI for the affordances under test. Each
- *  variant uses a unique companyId so they don't collide. */
+ *  These tests seed over the HTTP API and then exercise the UI for the
+ *  affordance under test. Each uses a unique companyId so they don't collide.
+ *
+ *  Variants 1-7 lived here and are gone. They drove the 5-pillar wizard at
+ *  /onboarding — the welcome screen, the company picker, the ↺ Reset button,
+ *  the slug-conflict warning, the resume auto-route. That surface is not
+ *  merely restyled: main.tsx:61-62 redirects /onboarding and /onboarding-chat
+ *  to /build, and `WavexOsOnboarding` — the host that mounted every one of
+ *  those affordances — is imported by nothing. The components still sit on
+ *  disk, which is the trap: grepping for "Pillar 1" or "↺ Reset" still finds
+ *  them. Unrouted AND unmounted is the same as deleted, so those seven could
+ *  never pass again without being rewritten against /build.
+ *
+ *  What survives here is route-independent of that cutover: v8-v11 seed over
+ *  HTTP and assert against Mission Control at "/", and they are the only
+ *  end-to-end proof that a template overlay survives finalize → activate →
+ *  DB → /api/agents → FleetGraph. See e2e/RETIRED.md. */
 
 import { test, expect, request as pwRequest, type Page, type APIRequestContext } from "@playwright/test";
 
@@ -36,236 +50,7 @@ async function seedFinalized(api: APIRequestContext, companyId: string): Promise
     mc: { horizon_cycles: 5, n_runs: 5, seed: 42 },
   });
 }
-
-/** Seed a *partial* company (pillars 1-3 only) so it shows in resume + auto-routes to pillar 4. */
-async function seedPartial(api: APIRequestContext, companyId: string): Promise<void> {
-  async function post(path: string, body: unknown): Promise<void> {
-    const resp = await api.post(path, { data: body });
-    if (!resp.ok()) throw new Error(`POST ${path} failed: ${resp.status()} ${await resp.text()}`);
-  }
-  await post("/wavex-os/onboarding/pillar/1", {
-    companyId, org_name: companyId,
-    raw_input: "no product yet",
-    manual_context: "Partial fixture seeded for resume + reset Playwright tests; mid-market SaaS shape.",
-  });
-  await post("/wavex-os/onboarding/pillar/2", { companyId, claude_plan: "max_5x" });
-  await post("/wavex-os/onboarding/pillar/3", { companyId, product_state: "live_paying_customers", stage: "10k_100k_mrr" });
-}
-
-async function startNewCompanyFromWelcome(page: Page, name: string): Promise<void> {
-  await page.goto("/onboarding?t0=1");
-  await expect(page.getByRole("heading", { name: /Onboarding/i }).first()).toBeVisible();
-  const nameInput = page.locator("input[autofocus], input:not([type='radio']):not([type='checkbox'])").first();
-  await nameInput.fill(name);
-  await page.getByRole("button", { name: /^Start/i }).click();
-  await expect(page.getByRole("heading", { name: /Pillar 1.*who you are/i })).toBeVisible();
-}
-
-test.describe("flow variants — 10x", () => {
-  /** ---------------------------------------------------------------- */
-  /** Variant 1: full happy path through the wizard from welcome screen */
-  test("v1: welcome → 5 pillars → 3 phases → concierge → finalize → activate → mission control", async ({ page }) => {
-    test.slow();
-    const id = uniqueId("v1-happy");
-
-    await startNewCompanyFromWelcome(page, id);
-
-    // Pillar 1 (no-product short-circuit)
-    const pillar1Inputs = page.locator("input[type='text'], input:not([type='radio']):not([type='checkbox']):not([type='password'])");
-    await pillar1Inputs.nth(0).fill(id);
-    await pillar1Inputs.nth(1).fill("no product yet");
-    await page.getByRole("button", { name: /^Next/i }).click();
-    await expect(page.getByRole("heading", { name: /confirm what we inferred/i })).toBeVisible({ timeout: 60_000 });
-    await page.getByRole("button", { name: /Confirm \+ continue/i }).click();
-
-    // Pillar 2
-    await expect(page.getByRole("heading", { name: /Verifying your setup/i })).toBeVisible();
-    await page.getByRole("button", { name: /Verify.*Continue/i }).click();
-    await expect(page.getByRole("heading", { name: /Pillar 3/i })).toBeVisible({ timeout: 60_000 });
-
-    // Pillar 3
-    await page.getByRole("button", { name: /^Next/i }).click();
-    await expect(page.getByRole("heading", { name: /Pillar 4/i })).toBeVisible();
-
-    // Pillar 4
-    await page.getByRole("button", { name: /^Next/i }).click();
-    await expect(page.getByRole("heading", { name: /Pillar 5/i })).toBeVisible();
-
-    // Pillar 5
-    await page.getByRole("button", { name: /Finish Phase 1/i }).click();
-    await expect(page.getByRole("heading", { name: /Phase 2.*Connectors/i })).toBeVisible({ timeout: 30_000 });
-
-    // Phase 2
-    await expect(page.getByRole("heading", { name: /^Required$/i })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: /Continue.*swarm/i }).click();
-    await expect(page.getByRole("heading", { name: /Credential Concierge/i })).toBeVisible({ timeout: 15_000 });
-
-    // Concierge — skip every required
-    let safety = 25;
-    while (safety-- > 0) {
-      const skipBtn = page.getByRole("button", { name: /^Skip$/ }).first();
-      if (!(await skipBtn.isVisible().catch(() => false))) break;
-      await skipBtn.click();
-      await page.getByRole("button", { name: /Confirm skip/i }).first().click();
-      await page.waitForTimeout(300);
-    }
-    await page.getByRole("button", { name: /Continue.*swarm/i }).click();
-    await expect(page.getByRole("heading", { name: /Phase 3.*Swarm/i })).toBeVisible({ timeout: 15_000 });
-
-    // Phase 3
-    await page.getByRole("button", { name: /Continue.*workflows/i }).click();
-    await expect(page.getByRole("heading", { name: /Phase 4.*Workflows/i })).toBeVisible({ timeout: 15_000 });
-
-    // Phase 4
-    await page.getByRole("button", { name: /Continue.*finalize/i }).click();
-    await expect(page.getByRole("heading", { name: /^Finalize$/i })).toBeVisible({ timeout: 15_000 });
-
-    // Finalize (skip T2)
-    await page.getByRole("checkbox", { name: /Skip T2 inference/i }).check();
-    await page.getByRole("button", { name: /Finalize.*sign/i }).click();
-    await expect(page.getByText(/MATERIALIZED/i)).toBeVisible({ timeout: 60_000 });
-
-    // Activate
-    await page.getByRole("button", { name: /Activate fleet/i }).click();
-    await expect(page.getByText(/Activated.*agents written to db/i)).toBeVisible({ timeout: 15_000 });
-    await expect(page).toHaveURL(new RegExp(`companyId=${id}`), { timeout: 10_000 });
-
-    // Pricing sits between Activate and Mission Control — choose plan, skip.
-    await page.getByRole("button", { name: /Choose plan/i }).click();
-    await expect(page.getByRole("heading", { name: /System Optimizer subscription/i }))
-      .toBeVisible({ timeout: 10_000 });
-    await page.getByRole("button", { name: /Skip.*continue without subscription/i }).click();
-
-    // Mission Control loaded
-    await expect(page.getByRole("heading", { name: /KPI scoreboard/i })).toBeVisible({ timeout: 15_000 });
-  });
-
-  /** ---------------------------------------------------------------- */
-  /** Variant 2: welcome screen lists existing draft companies in the resume section */
-  test("v2: welcome screen lists existing draft after seed", async ({ page }) => {
-    const api = await pwRequest.newContext({ baseURL: API });
-    const id = uniqueId("v2-list");
-    await seedPartial(api, id);
-    await api.dispose();
-
-    await page.goto("/onboarding");
-    // A company with answers in flight is a DRAFT — it lands in "In
-    // progress", not among the already-onboarded (those go to the canvas).
-    await expect(page.getByRole("heading", { name: /^In progress$/i })).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("code", { hasText: id })).toBeVisible();
-  });
-
-  /** ---------------------------------------------------------------- */
-  /** Variant 3: Reset (only) from welcome — company removed from picker */
-  test("v3: Reset only on welcome wipes the company from the picker", async ({ page }) => {
-    const api = await pwRequest.newContext({ baseURL: API });
-    const id = uniqueId("v3-reset-only");
-    await seedFinalized(api, id);
-    await api.dispose();
-
-    await page.goto("/onboarding");
-    const codeEl = page.locator("code", { hasText: id });
-    await expect(codeEl).toBeVisible({ timeout: 10_000 });
-
-    // Scope to THIS row so we don't accidentally Reset a leftover company from
-    // a prior test in the same Playwright run. The DOM is:
-    //   <div row>          ← codeEl/../..
-    //     <button resume><code>{id}</code></button>
-    //     <button>Reset</button>
-    //   </div>
-    const row = codeEl.locator("xpath=../..");
-    await row.getByRole("button", { name: /^Reset$/ }).click();
-    await expect(page.getByRole("heading", { name: /Reset.*\?/i })).toBeVisible();
-    await page.getByRole("button", { name: /Reset only/i }).click();
-
-    // Banner appears + companyId disappears from picker. Scope to "code inside
-    // a button" so we don't accidentally match the banner's own <code>{id}</code>.
-    await expect(page.getByText(/Reset.*wiped/i)).toBeVisible({ timeout: 10_000 });
-    await expect(page.locator("button code", { hasText: id })).toHaveCount(0, { timeout: 10_000 });
-  });
-
-  /** ---------------------------------------------------------------- */
-  /** Variant 4: Reset + restart drops at empty Pillar 1 with same companyId */
-  test("v4: Reset + restart returns to Pillar 1 with empty form", async ({ page }) => {
-    const api = await pwRequest.newContext({ baseURL: API });
-    const id = uniqueId("v4-reset-restart");
-    await seedFinalized(api, id);
-    await api.dispose();
-
-    await page.goto("/onboarding");
-    const codeEl = page.locator("code", { hasText: id });
-    await expect(codeEl).toBeVisible({ timeout: 10_000 });
-
-    const row = codeEl.locator("xpath=../..");
-    await row.getByRole("button", { name: /^Reset$/ }).click();
-    await page.getByRole("button", { name: /Reset \+ restart/i }).click();
-
-    // Lands on Pillar 1 with same companyId in URL
-    await expect(page).toHaveURL(new RegExp(`companyId=${id}`), { timeout: 10_000 });
-    await expect(page.getByRole("heading", { name: /Pillar 1.*who you are/i })).toBeVisible({ timeout: 10_000 });
-
-    // Pillar 1 form should be empty (not pre-populated with old data)
-    const pillar1Inputs = page.locator("input[type='text'], input:not([type='radio']):not([type='checkbox']):not([type='password'])");
-    await expect(pillar1Inputs.first()).toHaveValue("");
-  });
-
-  /** ---------------------------------------------------------------- */
-  /** Variant 5: in-wizard ↺ Reset button returns to welcome screen */
-  test("v5: in-wizard Reset button returns to welcome screen", async ({ page }) => {
-    const api = await pwRequest.newContext({ baseURL: API });
-    const id = uniqueId("v5-in-wizard");
-    await seedPartial(api, id);
-    await api.dispose();
-
-    await page.goto(`/onboarding?companyId=${id}`);
-    // Wizard shows ↺ Reset in header
-    const resetBtn = page.getByRole("button", { name: /↺ Reset/ });
-    await expect(resetBtn).toBeVisible({ timeout: 10_000 });
-
-    await resetBtn.click();
-    await expect(page.getByRole("heading", { name: /Reset.*\?/i })).toBeVisible();
-    await page.getByRole("button", { name: /Reset only/i }).click();
-
-    // Returns to welcome (no companyId in URL)
-    await expect(page).not.toHaveURL(new RegExp(`companyId=${id}`), { timeout: 10_000 });
-    await expect(page.getByRole("heading", { name: /Onboarding/i }).first()).toBeVisible();
-  });
-
-  /** ---------------------------------------------------------------- */
-  /** Variant 6: slug conflict warning prevents Start button from advancing */
-  test("v6: slug conflict warning + disables Start", async ({ page }) => {
-    const api = await pwRequest.newContext({ baseURL: API });
-    const id = uniqueId("v6-conflict");
-    await seedPartial(api, id);
-    await api.dispose();
-
-    await page.goto("/onboarding");
-    const nameInput = page.locator("input[autofocus], input:not([type='radio']):not([type='checkbox'])").first();
-    await nameInput.fill(id);
-
-    await expect(page.getByText(/already exists/i)).toBeVisible({ timeout: 10_000 });
-    const startBtn = page.getByRole("button", { name: /^Start/i });
-    await expect(startBtn).toBeDisabled();
-  });
-
-  /** ---------------------------------------------------------------- */
-  /** Variant 7: resume existing partial draft auto-routes to next pillar */
-  test("v7: resume partial draft auto-routes to next pillar (Pillar 4)", async ({ page }) => {
-    const api = await pwRequest.newContext({ baseURL: API });
-    const id = uniqueId("v7-resume");
-    await seedPartial(api, id);
-    await api.dispose();
-
-    await page.goto("/onboarding");
-    await expect(page.locator("code", { hasText: id })).toBeVisible({ timeout: 10_000 });
-
-    // Click the resume button (the company row's main button, NOT the Reset)
-    await page.locator("code", { hasText: id }).first().click();
-
-    // Auto-route on hydration: with pillars 1-3 complete, lands on Pillar 4
-    await expect(page.getByRole("heading", { name: /Pillar 4/i })).toBeVisible({ timeout: 15_000 });
-  });
-
+test.describe("activate → fleet", () => {
   /** ---------------------------------------------------------------- */
   /** Variant 8: Activate writes to DB; FleetGraph populates with agents */
   test("v8: Activate hydrates the FleetGraph with real agents", async ({ page }) => {

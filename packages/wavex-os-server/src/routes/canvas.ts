@@ -28,6 +28,7 @@
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { placeOperator, type PlacementInputs } from "../lib/placement.js";
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
@@ -36,6 +37,7 @@ import {
   COMMIT_ALLOWLIST, READ_BINDINGS, type CommitAction, type LayoutSpec, validateLayout,
 } from "../canvas/catalog.js";
 import { composeStub, classify, intentSignature, utteranceKey } from "../canvas/composer.js";
+import { computeManifestHash } from "@wavex-os/plugin-onboarding";
 import { composeT2OrStub, type T2Composition } from "../canvas/composer-t2.js";
 import { HEADLINES, type Snapshot } from "../canvas/snapshot.js";
 import { checkConstitution, readOrg } from "../org/store.js";
@@ -47,6 +49,51 @@ const LAYOUT_LRU = 50;
 const UTTERANCE_LRU = 200;
 const PROPOSAL_TTL_MS = 15 * 60_000;
 const RESHAPE_RE = /\b(differently|different view|another way|rebuild (this|it|that))\b/i;
+
+/** Fill approve-organization's body from the signed manifest on disk: the
+ *  sha the commit will verify against, and the birth path from pillar_1.
+ *  null = no manifest — nothing to approve. */
+async function enrichApproveProposal(
+  companyId: string,
+  proposal: { action: string; body: Record<string, unknown>; summary: string },
+): Promise<{ action: string; body: Record<string, unknown>; summary: string } | null> {
+  try {
+    const raw = await readFile(join(getOnboardingDir(companyId), "company.manifest.json"), "utf8");
+    const manifest = JSON.parse(raw) as Record<string, unknown>;
+    // Derived from PLACEMENT, not from `has_product`. The old rule could tell
+    // the operator "existing product wired in" at the approval gate while the
+    // server was seeding a real MVP goal behind it — a lie in the one sentence
+    // they read before committing.
+    const responses = (manifest as { pillar_responses?: PlacementInputs }).pillar_responses ?? {};
+    const rung = placeOperator(responses).rung;
+    const operating = rung === "operating";
+    // Departments, not agents: the fleet size is an implementation detail of
+    // the orchestration, and the operator-facing unit is the category.
+    //
+    // Counted the SAME way plan-assembly's departments step counts — chiefs
+    // are top-level, non-ceo, active slots. Counting distinct `department`
+    // values instead includes the CEO root and yields one more than the
+    // Review card showed, so the operator read "6 departments" at the
+    // approval gate and "7 departments" in its confirmation.
+    const agents = (manifest as { swarm_manifest?: { agents?: Record<string, { department?: string; status?: string }> } })
+      .swarm_manifest?.agents ?? {};
+    const departments = Object.entries(agents)
+      .filter(([slot, a]) => !slot.includes(".") && !slot.startsWith("ceo") && a.status === "active")
+      .length;
+    return {
+      ...proposal,
+      body: {
+        manifestSha256: computeManifestHash(manifest as never),
+        // Enum values unchanged — they are decorative (echoed, never read for
+        // behavior) and live in the commit allowlist's zod schema.
+        path: operating ? "adopted_product" : "mvp_build",
+      },
+      summary: `Approve the organization: ${departments} departments, goal + KPIs locked, ${operating ? "existing product wired in" : "build work seeded"}.`,
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface CanvasProposal {
   id: string;
@@ -358,6 +405,21 @@ export function registerCanvasRoutes(app: FastifyInstance): void {
           uses: (s.layouts[c.signature]?.uses ?? 0) + 1,
         };
         s.utterances[uKey] = c.signature;
+      }
+      if (c.proposal) {
+        // approve-organization is minted with an EMPTY body (the stub is
+        // sync); the route fills it from the signed manifest here. A missing
+        // manifest degrades the proposal to an honest text turn — Confirm
+        // must never appear for an organization that can't be activated.
+        if (c.proposal.action === "approve-organization") {
+          const enriched = await enrichApproveProposal(companyId, c.proposal);
+          if (!enriched) {
+            c.proposal = undefined;
+            turn.text = "There's no finalized organization to approve yet — finish building the plan first.";
+          } else {
+            c.proposal = enriched;
+          }
+        }
       }
       if (c.proposal) {
         const id = `p_${Date.now().toString(36)}_${randomBytes(3).toString("hex")}`;

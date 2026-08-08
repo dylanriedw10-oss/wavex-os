@@ -16,9 +16,11 @@
  *  pick order (ready = todo · attempts under ceiling · deps done, oldest
  *  first) and says so. */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { CSSProperties } from "react";
 import { ago, displayName } from "./OrgFlywheel";
+import { ClampedList } from "./ClampedList";
+import { regionBudget, useMeasuredHeight } from "./layout";
 import type { OrgWalkStep, WorkStateResponse } from "./contract";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -47,6 +49,10 @@ export function RuntimeTray({ open, onClose, work, walk }: {
   work: WorkStateResponse | null;
   walk: { question: string; steps: OrgWalkStep[]; revealed: number; busy: boolean } | null;
 }) {
+  // The tray is its own bounded region (spec Rev 10) — it measures itself
+  // rather than reading the instrument budget, because it floats over the
+  // instrument instead of living inside it.
+  const [trayRef, trayH] = useMeasuredHeight();
   useEffect(() => {
     if (!open) return;
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -54,6 +60,8 @@ export function RuntimeTray({ open, onClose, work, walk }: {
     return () => window.removeEventListener("keydown", h);
   }, [open, onClose]);
   if (!open) return null;
+  // Four sections share the sheet; each gets a quarter minus its own label.
+  const sectionPx = regionBudget(trayH / 4, 44);
 
   const tasks = work?.tasks ?? [];
   const byId = new Map(tasks.map((t) => [t.id, t]));
@@ -79,10 +87,10 @@ export function RuntimeTray({ open, onClose, work, walk }: {
     <>
       {/* outside-click catcher — no scrim: this is a popover, not a modal */}
       <div onClick={onClose} aria-hidden style={{ position: "fixed", inset: 0, zIndex: 40 }} />
-      <aside role="complementary" aria-label="Runtime" className="cv-pop" style={{
+      <aside ref={trayRef} role="complementary" aria-label="Runtime" className="cv-pop" style={{
         position: "fixed", top: 12, right: 12, bottom: 12, width: 380, maxWidth: "92vw", zIndex: 41,
         display: "flex", flexDirection: "column", gap: "var(--space-5)",
-        padding: "var(--space-5) var(--space-6)", overflowY: "auto",
+        padding: "var(--space-5) var(--space-6)", overflow: "hidden",
         animation: REDUCE ? undefined : "cv-tray-in 160ms var(--ease) both",
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -117,8 +125,9 @@ export function RuntimeTray({ open, onClose, work, walk }: {
             <div style={LABEL}>Now</div>
             {running.length === 0
               ? <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>Nothing running.</span>
-              : running.slice(0, 5).map((t) => row(t.id, "var(--live)", true,
-                  `Running · ${t.title}`, `attempt ${t.attempts + 1} of ${t.maxAttempts}`))}
+              : <ClampedList items={running} rowPx={27} availPx={sectionPx} min={1} max={5}
+                  render={(t) => row(t.id, "var(--live)", true,
+                    `Running · ${t.title}`, `attempt ${t.attempts + 1} of ${t.maxAttempts}`)} />}
           </div>
         )}
 
@@ -129,10 +138,12 @@ export function RuntimeTray({ open, onClose, work, walk }: {
               ? <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>Nothing ready.</span>
               : (
                 <>
-                  {ready.slice(0, 5).map((t) => row(t.id, "rgba(0,0,0,0.18)", false,
-                    t.title, displayName(t.assigneeSlot.split(".").pop() ?? t.assigneeSlot)))}
+                  <ClampedList items={ready} rowPx={27} availPx={sectionPx} min={1} max={5}
+                    moreLabel={(hidden, total) => `next ${total - hidden} of ${total} ready`}
+                    render={(t) => row(t.id, "rgba(0,0,0,0.18)", false,
+                      t.title, displayName(t.assigneeSlot.split(".").pop() ?? t.assigneeSlot))} />
                   <div className="text-dim" style={{ fontSize: "var(--text-xs)", marginTop: 4 }}>
-                    {ready.length > 5 ? `next 5 of ${ready.length} ready · ` : ""}the order a cycle would pick
+                    the order a cycle would pick
                   </div>
                 </>
               )}
@@ -143,11 +154,11 @@ export function RuntimeTray({ open, onClose, work, walk }: {
         {finished.length > 0 && (
           <div>
             <div style={LABEL}>Just finished</div>
-            {finished.map((e) => {
-              const p = FINISH_PHRASE[e.kind];
+            <ClampedList items={finished} rowPx={27} availPx={sectionPx} min={1} max={6} render={(e) => {
+              const p = FINISH_PHRASE[e.kind]!;
               const title = (e.taskId && byId.get(e.taskId)?.title) || e.detail;
               return row(e.id, p.tone, false, `${p.text} · ${title}`, ago(e.ts));
-            })}
+            }} />
           </div>
         )}
       </aside>

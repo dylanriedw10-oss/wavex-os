@@ -1,4 +1,4 @@
-# The Recursive Org — Build Spec (Revision 9, the runtime tray)
+# The Recursive Org — Build Spec (Revision 10, the fit law)
 
 **Status:** canonical. Revision 3 grounded the "NL + Recursive Org Interface" concept in the
 shipped surface. Revision 4 made the organization **adaptive**: memory, influence, gravity,
@@ -18,7 +18,11 @@ sanctioned overlay: a transient, read-only Popover-layer sheet making the runtim
 glanceable from any context (now / up next / just finished / walking), with checklist
 semantics translated from Claude Code's verified task-list behavior and an honesty
 amendment (no invented present-continuous text; the state word does that job).
-Reconciliation records (Rev 2→…→9) are §12.
+Revision 10 states **the fit law** — density is bounded by the WINDOW, not by the
+content: the shell is locked to the viewport, every view fits at ≥700px, and a list
+renders what fits, prints its true total, and sends the remainder one level deeper.
+It supersedes Rev 5's "amended to restraint" ruling on scrolling.
+Reconciliation records (Rev 2→…→10) are §12.
 
 **Companions:** `docs/design/` (the design system: FRONTEND_CONSTITUTION · DESIGN_TOKENS ·
 INTERACTION_SYSTEM · SPATIAL_ARCHITECTURE · COMPONENT_RULES · QUALITY_GATE),
@@ -263,6 +267,74 @@ ring binds to counted ratios or doesn't render), fictional humans with photos
 (slots wear medallions), invented "thought" counts (attempts, deliverables, and
 hops are the real counts), a printed "Healthy" pill (nominal is silence), and the
 Filters/Customize bar (filtering is what the descent and the composer are for).
+
+**Revision 11 — the Rev 9 deferral, discharged for Phase 3 only.** Rev 9
+rejected three things from the dynamic-workflow-panel prompt; one of them — the
+workspace panel-assembly feed — was deferred with a condition: *"composition
+doesn't stream yet; wire it when it does."* Onboarding's Build-the-Plan phase
+now opens with a real research call, which is the first genuinely async
+composition in the product, so that condition is met **there and nowhere else
+yet**. What landed is the smallest thing that satisfies it: the existing trace
+strip gains a one-word stage eyebrow (`RESEARCHING` → `PLANNING`), and the
+findings render as a panel that morphs into the first plan cell rather than
+dissolving — findings are the plan's provenance, and `dissolve` means
+*rejected* in this vocabulary. **The permanent corner dock stays rejected**
+(one address per fact), and the counter stays silent during research because
+the total is genuinely unknown while the model is working. The execution model
+those findings serve is `EXECUTION_MODEL.md`.
+
+## Revision 10 — the fit law
+
+**The law.** *Density is bounded by the WINDOW, not by the content.* Every view
+fits the viewport. A list renders what fits, states its TRUE total, and sends the
+remainder one level deeper. Only *the record itself* may scroll.
+
+**What was actually broken.** Rev 7 wrote the density budgets and nothing
+enforced them. `.canvas-root` carried `minHeight: 100vh`, which lets the shell
+GROW past the viewport — so the split's `flex: 1` resolved against the grown
+height, both panes' `overflow` went inert, and the page itself scrolled. The
+fixed-zone law (masthead → rail → instrument → shelf) was therefore never true:
+the masthead scrolled away with everything else. Measured before the fix, at
+1494×863 with the Work lens open: **323px of document overflow, zero internal
+scrollers, an instrument zone of 914px inside an 808px budget.**
+
+**The shell contract.** `height: 100dvh` + `overflow: hidden` on the root
+(`dvh`, not `vh` — `vh` ignores mobile's collapsing URL bar); `minHeight: 0` on
+every flex child that must be allowed to shrink below its content. The
+workspace splits into a flexing INSTRUMENT (the measured budget) and a pinned
+SHELF that never yields.
+
+**The measurement.** ONE `ResizeObserver` on the instrument zone, published
+through context (`canvas/layout.ts`). A per-list observer would thrash — every
+clamp changes height, which re-triggers every other observer. `fitRows()` is a
+pure function so the budget arithmetic is testable without a DOM.
+
+**The counted clamp.** `ClampedList` replaces ~18 hardcoded `slice(0, N)`
+constants that were correct at exactly one window size. It generalizes the shape
+the desk's `sideCard` already had right: render what fits, print the real count,
+offer the descent. **No silent caps** — a clamp the operator can't see is the
+interface lying about how much exists, the same failure class as an invented
+metric. The Runtime tray's *"next 5 of 9 ready"* is the voice every list adopts.
+
+**The wheel scales.** The face's internal coordinate system stays at 520 and the
+rendered box scales, so the SVG and the absolutely positioned HTML petal labels
+scale together with no geometry rewrite. The 0.72 floor is a LEGIBILITY
+constraint, not a round number: labels are 14px and 14 × 0.72 ≈ 10px is the
+smallest honest size. Below the floor L0 sheds a stratum instead of shrinking.
+
+**Two named exceptions, both append-only records that cannot be clamped without
+lying:**
+
+| Exception | Why it may scroll |
+|---|---|
+| The transcript | Conversation is append-only and §4 makes it "the substrate and the record". Hiding turns behind a descend would hide the record itself. |
+| The verbatim deliverable at L3 | L3 IS the deepest level — there is nowhere to descend to — and the honesty law requires engine output render verbatim. A clamp would be the interface editing the machine's words. |
+
+**Enforcement.** `e2e/no-scroll.spec.ts` visits L0, all four lenses, the expanded
+ladder, a desk, the tray, and an ephemeral workspace at 1440×900, 1280×800, and
+1024×700, asserting zero document overflow and no scroller outside the two
+exceptions. Its fixture is deliberately WIDE (12 slots → 12 tasks) because a
+narrow fixture would fit trivially and prove nothing.
 
 ## Thesis
 
@@ -659,3 +731,17 @@ composed with allowlist + proposal→confirm; discovery answered with the §0 ma
 | "12 thoughts" counts | **Rejected as drawn** — the real counts are attempts, deliverables, feedback notes, hops |
 | Thinking / Memory / Artifacts sidebar | **Adopted as counted previews** — desk-scoped run events + walk hops, node memory, desk deliverables; each exits to its lens (a desk-only amendment to Rev 7's folded strata) |
 | Printed "Healthy" pill · Filters/Customize bar | **Rejected** — nominal is silence; filtering is the descent's job |
+
+**Rev 9 → Rev 10 (the fit law, resolved):**
+
+| Direction | Resolution |
+|---|---|
+| "It should fit my window with zero scrolling" (operator, recorded) | **Adopted as law** — and it **supersedes Rev 5's "Nothing scrolls → amended to restraint"**. That amendment was made when the budgets were aspirational; with the budgets computed, restraint is no longer needed to make the surface honest |
+| The page scrolls instead of the panes | **Root-caused, not patched** — `minHeight: 100vh` let the shell grow, which made every descendant's `overflow` inert. `height: 100dvh` + `overflow: hidden` closes the contract |
+| ~18 hardcoded `slice(0, N)` caps | **Replaced by measured budgets** — `fitRows()` against one observed instrument height; the constants were correct at exactly one window size |
+| Expanded ladder groups uncapped | **Fixed** — 40 tasks meant 40 rows; the group now clamps and counts |
+| Fixed 520px wheel | **Scaled** — the rendered box scales, the 520 coordinate system does not; 0.72 floor set by 14px label legibility |
+| Where does overflow go? | **One level deeper, never further down the page** — the descent already exists; a clamp routes into it |
+| Silent truncation | **Forbidden** — every clamp prints its true total. A cap the operator can't see is the same failure class as an invented metric |
+| Genuinely unbounded content (transcript, verbatim output) | **Two named exceptions** — both are append-only records; clamping them would hide or edit the record itself. Everything else fits |
+| Does the law hold across views? | **Made mechanical** — `e2e/no-scroll.spec.ts` at three sizes including the 700px floor; documented judgment alone had already failed once |
