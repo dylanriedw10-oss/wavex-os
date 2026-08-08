@@ -353,6 +353,24 @@ const pillar2Schema = z.object({
   companyId: z.string().min(1),
   claude_plan: z.enum(["max_20x", "max_5x", "api_only", "other"]),
   claude_plan_other_note: z.string().optional(),
+  // Same flag, same meaning, as every other inference-calling route here.
+  // Pillar 2 was the last one that could not be told to stay offline.
+  //
+  // The vendored probe (claude-code-check.ts) runs TWO subprocesses: step 1
+  // `claude --version`, step 2 `claude -p "Reply with exactly: OK"
+  // --output-format json` with a 60 s timeout. Step 2 is a live T2 call — a
+  // real prompt, billed to the operator's subscription — and it ran on every
+  // POST to this route, including from an e2e harness that documents itself
+  // as making no live T2 calls. Five fixtures × one 60 s-budgeted model call,
+  // inside a 30 s vitest ceiling, is the race that produced 6/4/12 failures
+  // across three runs of identical code.
+  //
+  // Scope, stated honestly: this suppresses step 2 ONLY. Step 1 still runs,
+  // because "is the CLI installed" is a local capability question that costs
+  // nothing and asks no model anything. The consequence is that
+  // claude_code_verified comes back false — we did not verify auth, and
+  // saying otherwise would be inventing a result we never obtained.
+  skipInference: z.boolean().optional(),
 });
 
 const pillar3Schema = z.object({
@@ -545,6 +563,8 @@ export function registerPillarRoutes(app: FastifyInstance): void {
         // populated it at boot. Make the dependency explicit instead of
         // relying on a global that a different boot order could leave unset.
         claudeBin: getClaudeBin(),
+        // Deterministic path: version probe only, no live prompt.
+        skipTestCall: body.skipInference,
       });
       await updatePillar(body.companyId, "pillar_2", outcome.response);
       return outcome;
