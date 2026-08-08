@@ -29,6 +29,12 @@ import {
   resetInferenceLog,
   assertNoInference,
 } from "./helpers/no-inference.js";
+import {
+  installNoEgressGuard,
+  uninstallNoEgressGuard,
+  resetEgressLog,
+  assertNoEgress,
+} from "./helpers/no-egress.js";
 
 let tempDir: string;
 let app: FastifyInstance;
@@ -38,6 +44,12 @@ beforeAll(async () => {
   // bin at registration time, and we want every launch after that to route
   // through the guard.
   installNoInferenceGuard();
+  // The process guard covers spawns only. T1 inference and every Paperclip
+  // control-plane call go out over fetch, where it cannot see them — and
+  // detectAndConfigurePaperclip() will point the handoff bridge at any
+  // Paperclip that answers on 3100/3000. No origin is allowlisted here:
+  // this file owns no listener, so it should reach nothing.
+  installNoEgressGuard();
   tempDir = mkdtempSync(join(tmpdir(), "wavex-e2e-"));
   process.env.WAVEX_OS_STATE_DIR = tempDir;
   process.env.PAPERCLIP_DATA_DIR = tempDir;
@@ -52,25 +64,34 @@ beforeAll(async () => {
   app = Fastify({ logger: false });
   registerWavexOsRoutes(app);
   await app.ready();
+
+  // Assert here too, not only in afterEach: beforeEach calls resetEgressLog(),
+  // so anything route registration or boot did would be erased before the
+  // first test could report it. Without this line the guard is blind to
+  // exactly the code that runs earliest.
+  assertNoEgress("e2e onboarding — server boot");
 });
 
 beforeEach(() => {
   // Per-test log, so a failure names the phase that went online rather than
   // pointing at whichever test happened to run last.
   resetInferenceLog();
+  resetEgressLog();
 });
 
 // The blanket net. Deliberately an afterEach and not a line inside each test:
-// the file-level claim is that NOTHING here talks to a model, so a test added
-// tomorrow inherits the assertion instead of having to remember it.
+// the file-level claim is that NOTHING here talks to a model or to a control
+// plane, so a test added tomorrow inherits both assertions instead of having
+// to remember them.
 afterEach(() => {
-  assertNoInference(
-    `e2e onboarding — "${expect.getState().currentTestName ?? "unknown test"}"`,
-  );
+  const where = `e2e onboarding — "${expect.getState().currentTestName ?? "unknown test"}"`;
+  assertNoInference(where);
+  assertNoEgress(where);
 });
 
 afterAll(async () => {
   uninstallNoInferenceGuard();
+  uninstallNoEgressGuard();
   await app?.close();
   delete process.env.WAVEX_OS_STATE_DIR;
   delete process.env.PAPERCLIP_DATA_DIR;
