@@ -41,6 +41,21 @@
  *  A bare `claude`, a prompt on stdin, or any unrecognised flag counts as an
  *  inference attempt. A guard that has to recognise every way to ask for a
  *  completion is a guard with holes.
+ *
+ *  One sharp edge, stated so nobody has to rediscover it
+ *  ────────────────────────────────────────────────────
+ *  The matcher treats whatever `WAVEX_OS_CLAUDE_BIN` currently points at as
+ *  a claude binary. That is the intended reading — if you have declared a
+ *  bin, that IS your bin — but it means a suite which points the var at a
+ *  deliberate offline fake AND installs this guard would find its fake
+ *  stubbed out. test/plan-research.test.ts is exactly such a suite (it sets
+ *  the var to test/fixtures/fake-claude.sh). It does not install the guard,
+ *  so there is no conflict today; if you add the guard there, drive the fake
+ *  through an explicit bin argument instead of the env var.
+ *
+ *  This is also why installNoInferenceGuard/uninstallNoInferenceGuard must be
+ *  paired: the patch lands on a process-global prototype, so a file that
+ *  installs without restoring could reach a sibling suite that never opted in.
  */
 
 import { spawn } from "node:child_process";
