@@ -63,9 +63,19 @@ import { registerWizardEventsRoute } from "./routes/wizard-events.js";
 import { registerReferralRoutes } from "./routes/referrals.js";
 import { registerGitHubReposRoute } from "./routes/github-repos.js";
 import { registerMissionControlRoutes } from "./routes/mission-control.js";
-import { startReferralEmailBScheduler } from "./jobs/referral-email-b.js";
-import { startProfessionalReengagementScheduler } from "./jobs/professional-reengagement.js";
-import { startBookingIntentCleanupScheduler } from "./jobs/booking-intent-cleanup.js";
+import { closeDb } from "@wavex-os/db";
+import {
+  startReferralEmailBScheduler,
+  stopReferralEmailBScheduler,
+} from "./jobs/referral-email-b.js";
+import {
+  startProfessionalReengagementScheduler,
+  stopProfessionalReengagementScheduler,
+} from "./jobs/professional-reengagement.js";
+import {
+  startBookingIntentCleanupScheduler,
+  stopBookingIntentCleanupScheduler,
+} from "./jobs/booking-intent-cleanup.js";
 import { runAbandonedBookingRecoveryJob } from "./jobs/abandoned-booking-recovery.js";
 import { registerReengagementRoutes } from "./routes/reengagement.js";
 import { registerBookingRecoveryRoute } from "./routes/booking-recovery.js";
@@ -134,15 +144,35 @@ export function registerWavexOsRoutes(app: FastifyInstance): void {
   registerMissionControlRoutes(app);
   registerReengagementRoutes(app);
   registerBookingRecoveryRoute(app);
-  startReferralEmailBScheduler();
-  startProfessionalReengagementScheduler();
-  startBookingIntentCleanupScheduler();
-  // One-shot: diagnose + optionally send abandoned booking recovery nudges.
-  // Safe by default (WAVEX_ABANDONED_BOOKING_DRY_RUN=true). Set to "false"
-  // after CEO approval to actually send. idempotent via nudge log unique constraint.
-  void runAbandonedBookingRecoveryJob().catch((err) =>
-    console.error("[abandoned-booking-recovery] startup run failed:", err),
-  );
+  // Background work started by this registration. Each entry is the job's
+  // startup run — already error-handled, kept only so shutdown can drain it.
+  const backgroundRuns: Promise<void>[] = [
+    startReferralEmailBScheduler(),
+    startProfessionalReengagementScheduler(),
+    startBookingIntentCleanupScheduler(),
+    // One-shot: diagnose + optionally send abandoned booking recovery nudges.
+    // Safe by default (WAVEX_ABANDONED_BOOKING_DRY_RUN=true). Set to "false"
+    // after CEO approval to actually send. idempotent via nudge log unique constraint.
+    runAbandonedBookingRecoveryJob().then(
+      () => undefined,
+      (err) => console.error("[abandoned-booking-recovery] startup run failed:", err),
+    ),
+  ];
+
+  // The jobs above outlive the request that started them: the referral
+  // scheduler's startup run opens the database and migrates it. Nothing used
+  // to bind that to the server, so `await app.close()` returned while a
+  // migration was still writing, and whoever removed the data directory next
+  // pulled the filesystem out from under a live PGlite — surfacing as an
+  // unhandled `ErrnoError { errno: 44 }` (emscripten's ENOENT) with no stack,
+  // blamed on whichever request or test happened to be in flight.
+  app.addHook("onClose", async () => {
+    stopReferralEmailBScheduler();
+    stopProfessionalReengagementScheduler();
+    stopBookingIntentCleanupScheduler();
+    await Promise.allSettled(backgroundRuns);
+    await closeDb();
+  });
 }
 
 export { applyStateBridge, getInstanceDir, getOnboardingDir, getWavexDataRoot } from "./state-bridge.js";

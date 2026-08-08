@@ -271,12 +271,16 @@ export async function runProfessionalReengagementJob(): Promise<ReengagementRunR
 
 const HOUR_MS = 60 * 60 * 1000;
 let schedulerHandle: ReturnType<typeof setInterval> | null = null;
+let startupRun: Promise<void> = Promise.resolve();
 
-export function startProfessionalReengagementScheduler(): void {
-  if (schedulerHandle) return;
+/** Starts the hourly scheduler and returns its startup run so the caller can
+ *  drain it on shutdown. */
+export function startProfessionalReengagementScheduler(): Promise<void> {
+  if (schedulerHandle) return startupRun;
 
-  void runProfessionalReengagementJob().catch((err) =>
-    console.error("[professional-reengagement] initial run failed:", err),
+  startupRun = runProfessionalReengagementJob().then(
+    () => undefined,
+    (err) => console.error("[professional-reengagement] initial run failed:", err),
   );
 
   schedulerHandle = setInterval(() => {
@@ -290,6 +294,7 @@ export function startProfessionalReengagementScheduler(): void {
   console.log(
     `[professional-reengagement] hourly scheduler started (dryRun=${isDryRun()})`,
   );
+  return startupRun;
 }
 
 export function stopProfessionalReengagementScheduler(): void {
