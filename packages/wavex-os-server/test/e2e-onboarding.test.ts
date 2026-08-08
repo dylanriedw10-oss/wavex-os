@@ -8,9 +8,13 @@
  *    5. POST finalize → assert manifest shape, signed sha256, expected files on disk
  *    6. GET /api/instance/<id>/{manifest,kpis} — assert dashboard hydrates
  *
- *  No live T2 inference (bypass via deterministicOverride / skipInference). */
+ *  No live T2 inference (bypass via deterministicOverride / skipInference).
+ *  That is not a promise this file makes and hopes you believe — every test
+ *  below ends by asserting it, via the process-level guard in
+ *  ./helpers/no-inference.ts. See that file for why a timeout is not an
+ *  assertion. */
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,11 +23,21 @@ import { registerWavexOsRoutes } from "../src/index.js";
 import { _resetDbCache } from "@wavex-os/db";
 import { _resetMasterKeyCache } from "../src/vault/crypto.js";
 import { _resetMigrationLatch } from "../src/vault/service.js";
+import {
+  installNoInferenceGuard,
+  uninstallNoInferenceGuard,
+  resetInferenceLog,
+  assertNoInference,
+} from "./helpers/no-inference.js";
 
 let tempDir: string;
 let app: FastifyInstance;
 
 beforeAll(async () => {
+  // Install BEFORE the server boots: applyInferenceEnv() resolves the claude
+  // bin at registration time, and we want every launch after that to route
+  // through the guard.
+  installNoInferenceGuard();
   tempDir = mkdtempSync(join(tmpdir(), "wavex-e2e-"));
   process.env.WAVEX_OS_STATE_DIR = tempDir;
   process.env.PAPERCLIP_DATA_DIR = tempDir;
@@ -40,7 +54,23 @@ beforeAll(async () => {
   await app.ready();
 });
 
+beforeEach(() => {
+  // Per-test log, so a failure names the phase that went online rather than
+  // pointing at whichever test happened to run last.
+  resetInferenceLog();
+});
+
+// The blanket net. Deliberately an afterEach and not a line inside each test:
+// the file-level claim is that NOTHING here talks to a model, so a test added
+// tomorrow inherits the assertion instead of having to remember it.
+afterEach(() => {
+  assertNoInference(
+    `e2e onboarding — "${expect.getState().currentTestName ?? "unknown test"}"`,
+  );
+});
+
 afterAll(async () => {
+  uninstallNoInferenceGuard();
   await app?.close();
   delete process.env.WAVEX_OS_STATE_DIR;
   delete process.env.PAPERCLIP_DATA_DIR;
@@ -172,13 +202,20 @@ async function walkPillars(fx: Fixture): Promise<void> {
   });
   expect(p1.status, `pillar 1 for ${fx.companyId}`).toBe(200);
   expect(p1.body.ok).toBe(true);
+  assertNoInference(`pillar 1 for ${fx.companyId} (skipInference: true)`);
 
-  // Pillar 2 — claude probe; in test env we only assert the pillar accepts the post
+  // Pillar 2 — claude capability probe; in test env we only assert the pillar
+  // accepts the post. skipInference keeps it to `--version` (does this machine
+  // have the CLI?) instead of the vendored probe's second step, a live
+  // `claude -p "Reply with exactly: OK"` with a 60 s budget — which is real T2
+  // inference, inside a 30 s vitest ceiling, five times per run.
   const p2 = await inject<{ ok: boolean }>("POST", "/wavex-os/onboarding/pillar/2", {
     companyId: fx.companyId,
     claude_plan: fx.pillar2.claude_plan,
+    skipInference: true,
   });
   expect(p2.status, `pillar 2 for ${fx.companyId}`).toBe(200);
+  assertNoInference(`pillar 2 for ${fx.companyId} (skipInference: true)`);
 
   const p3 = await inject<{ ok: boolean }>("POST", "/wavex-os/onboarding/pillar/3", {
     companyId: fx.companyId,
