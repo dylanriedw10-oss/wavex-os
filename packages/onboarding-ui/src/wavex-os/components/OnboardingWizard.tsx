@@ -10,11 +10,34 @@
  *  Current step is persisted to the backend so a refresh resumes correctly. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { userApi, smokeTestApi, type SmokeTestPhase } from "../lib/api";
 import { Step2PlatformCard, type PlatformTarget } from "./Step2PlatformCard";
 import { GitHubRepoStep } from "./GitHubRepoStep";
 
 const TOTAL_STEPS = 3;
+
+/** Routes this overlay must never cover.
+ *
+ *  main.tsx mounts this component OUTSIDE <Routes>, so without this it
+ *  renders on top of every surface whenever is_new_user=true. `/build` is
+ *  the product's onboarding surface — the cutover made /onboarding and
+ *  /onboarding-chat redirect there and main.tsx calls it "THE onboarding
+ *  surface" — so covering it locks new operators out of the exact flow
+ *  they are there to complete. Operator setup (repo / workspace / smoke
+ *  test) is a different concern and must not gate it.
+ *
+ *  Prefix match, so /build?companyId=… and any future /build/* subpath are
+ *  covered too. This suppresses the overlay only; it does not complete or
+ *  dismiss the wizard, so it still appears on other surfaces and resumes at
+ *  the persisted step. */
+const OVERLAY_SUPPRESSED_PATHS = ["/build"];
+
+function overlayIsSuppressed(pathname: string): boolean {
+  return OVERLAY_SUPPRESSED_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+}
 
 const STEPS = [
   {
@@ -331,6 +354,7 @@ export function OnboardingWizard() {
   const [saving, setSaving] = useState(false);
   const [platformTarget, setPlatformTarget] = useState<PlatformTarget>(loadPlatformTarget);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const suppressed = overlayIsSuppressed(useLocation().pathname);
 
   useEffect(() => {
     userApi.me()
@@ -375,12 +399,12 @@ export function OnboardingWizard() {
     platformTarget.platform !== null && platformTarget.identifier.trim().length > 0;
 
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || suppressed) return;
     document.title = wizardDocumentTitle(step);
     return () => {
       document.title = "WaveX OS";
     };
-  }, [step, visible]);
+  }, [step, visible, suppressed]);
 
   const handleNext = useCallback(async () => {
     if (step === 2) savePlatformTarget(platformTarget);
@@ -405,7 +429,7 @@ export function OnboardingWizard() {
     }
   }, [userId]);
 
-  if (loading || !visible) return null;
+  if (loading || !visible || suppressed) return null;
 
   const progressPct = Math.round((step / TOTAL_STEPS) * 100);
   const current = STEPS[step - 1];
