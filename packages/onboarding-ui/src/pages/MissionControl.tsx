@@ -128,7 +128,22 @@ export default function MissionControl() {
           <span className="text-dim" style={{ fontSize: 12 }}>· Mission Control</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
-          <Link to="/canvas" style={{ fontSize: 12 }}>Canvas</Link>
+          {/* The tappable box is 44×44 while the label stays 12px. Measured
+              at 18px tall on an iPhone 13 viewport, which is under the 44px
+              minimum `touch-target.spec.ts` enforces — the label was the
+              hit area. Growing the box rather than the text keeps the
+              header's visual weight unchanged. */}
+          <Link
+            to="/canvas"
+            style={{
+              fontSize: 12,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 44,
+              minWidth: 44,
+            }}
+          >Canvas</Link>
           <div data-tour="mc-company"><CompanyPicker /></div>
           <div data-tour="mc-health"><HealthStrip /></div>
         </div>

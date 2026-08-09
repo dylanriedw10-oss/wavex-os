@@ -36,6 +36,15 @@ export default defineConfig({
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    // Per-REQUEST cap, kept at 15s deliberately.
+    //
+    // Raising this to 60s was tried and REVERTED: it was treating the
+    // symptom. `POST .../pillar/2` was blowing the budget because
+    // handlePillar2 SPAWNS the real claude CLI to verify the plan, which is
+    // seconds of variable work that a fixture should never pay. The seeds
+    // now pass `skipInference: true` (skipTestCall), so the request is a
+    // plain DB write again. If this cap starts failing tests, look for new
+    // real work on the request path before raising it.
     actionTimeout: 15_000,
     navigationTimeout: 30_000,
     // Containers with a pre-provisioned Chromium set PW_CHROMIUM to its

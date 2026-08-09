@@ -19,13 +19,25 @@ test.describe("Mission Control dashboard", () => {
         throw new Error(`POST ${path} failed: ${resp.status()} ${await resp.text()}`);
       }
     }
+    // skipInference matters here and its absence was costing this spec.
+    // `raw_input` is a URL, so pillar/1 took the enrichment path: a real
+    // URL prefetch against a domain that does not resolve, then a BYOC
+    // claude call (PILLAR1_CLAUDE_TIMEOUT_MS = 25s). Measured end to end at
+    // 20.3s against Playwright's 15s request timeout, so the FIRST test of
+    // the run failed in beforeAll while every later test passed — and the
+    // seed was spending a real model call to build a fixture.
+    // pillars.ts:468 short-circuits on `skipInference || looksLikeNoProduct`,
+    // which is why every other seed in this repo ("no product yet") is fast.
+    // Same fixture, 3.7ms, no network, no inference.
     await post("/wavex-os/onboarding/pillar/1", {
       companyId: COMPANY_ID,
       org_name: "PW Dash",
       raw_input: "https://pw-dash.example",
       manual_context: "PW Dash is a B2B SaaS dashboard test company. Mid-market, monthly subscription, assisted demo.",
+      skipInference: true,
     });
-    await post("/wavex-os/onboarding/pillar/2", { companyId: COMPANY_ID, claude_plan: "max_5x" });
+    // See the pillar/1 note: pillar/2 spawns the real claude CLI without this.
+    await post("/wavex-os/onboarding/pillar/2", { companyId: COMPANY_ID, claude_plan: "max_5x", skipInference: true });
     await post("/wavex-os/onboarding/pillar/3", { companyId: COMPANY_ID, product_state: "live_paying_customers", stage: "10k_100k_mrr" });
     await post("/wavex-os/onboarding/pillar/4", { companyId: COMPANY_ID, lead_sources: ["outbound_cold"], sales_motion: "assisted_demo", close_channel: "mostly_phone_video" });
     await post("/wavex-os/onboarding/pillar/5", { companyId: COMPANY_ID, comm_channel: "telegram", urgency_routing: "all_to_one_channel" });

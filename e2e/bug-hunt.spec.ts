@@ -10,6 +10,19 @@ function uniqueId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/** Agents an activate inserts for a seeded company before any add-agent.
+ *
+ *  Derived, not guessed: SLOT_TO_TEMPLATE in
+ *  packages/wavex-os-server/src/bridge/catalog.ts defines 29 reporting
+ *  slots, and activate adds the 6 chiefs (cdo, cfo, cmo, coo, cpo, cro) —
+ *  29 + 6 = 35, verified against a live activate with zero duplicate slots.
+ *
+ *  These four assertions were hard-coded to 34 and drifted when the catalog
+ *  gained a slot. Every assertion in this file that measured its own
+ *  baseline first (B4, B8, B20) stayed green through the same change, which
+ *  is the argument for one named constant over four literals. */
+const BASE_AGENTS = 35;
+
 async function seedFinalized(api: APIRequestContext, companyId: string): Promise<void> {
   async function post(path: string, body: unknown): Promise<void> {
     const resp = await api.post(path, { data: body });
@@ -20,7 +33,12 @@ async function seedFinalized(api: APIRequestContext, companyId: string): Promise
     raw_input: "no product yet",
     manual_context: "Bug-hunt fixture seeded for e2e edge-case coverage of the activate + dashboard flow.",
   });
-  await post("/wavex-os/onboarding/pillar/2", { companyId, claude_plan: "max_5x" });
+  // skipInference: pillar/2 otherwise SPAWNS the real claude CLI to verify
+  // the plan (handlePillar2 -> skipTestCall). That is seconds of variable
+  // real work per test, it was the request that blew every budget, and a
+  // fixture has no business shelling out to a model. The documented cost is
+  // claude_code_verified: false, which nothing here asserts.
+  await post("/wavex-os/onboarding/pillar/2", { companyId, claude_plan: "max_5x", skipInference: true });
   await post("/wavex-os/onboarding/pillar/3", { companyId, product_state: "live_paying_customers", stage: "10k_100k_mrr" });
   await post("/wavex-os/onboarding/pillar/4", { companyId, lead_sources: ["outbound_cold"], sales_motion: "assisted_demo", close_channel: "mostly_phone_video" });
   await post("/wavex-os/onboarding/pillar/5", { companyId, comm_channel: "telegram", urgency_routing: "all_to_one_channel" });
@@ -34,7 +52,14 @@ async function seedFinalized(api: APIRequestContext, companyId: string): Promise
 }
 
 async function activate(api: APIRequestContext, companyId: string): Promise<{ inserted: { agents: number }; warnings: string[] }> {
-  const r = await api.post(`/api/instance/${companyId}/activate`);
+  // Overridden per-request rather than by raising the global actionTimeout.
+  // Unlike pillar/2 — which was slow because it spawned the claude CLI, work
+  // it had no business doing — activate is legitimately heavy: it inserts 35
+  // agents plus KPI rows in one shot into WASM Postgres. 15s is a real
+  // squeeze for that, and B5 (the only test that activates twice) was the
+  // one that felt it. Widen the call that is honestly slow; leave the cap
+  // tight for everything else so the next spurious cost still shows up.
+  const r = await api.post(`/api/instance/${companyId}/activate`, { timeout: 60_000 });
   if (!r.ok()) throw new Error(`activate failed: ${r.status()} ${await r.text()}`);
   return r.json();
 }
@@ -46,6 +71,21 @@ async function fetchAgents(api: APIRequestContext, companyId: string): Promise<A
 }
 
 test.describe("bug hunt — composition + edge cases", () => {
+  /** Every test here seeds a full company (9 API calls) and activates it —
+   *  10–35s of real work against a single-process PGlite that serializes
+   *  writes across the whole file. Playwright's 30s default is not a budget
+   *  these fit in under contention.
+   *
+   *  When one overran, the fixture was torn down mid-request and the failure
+   *  surfaced as "apiRequestContext.post: Request context disposed" or as a
+   *  half-finished assertion — never as a timeout. WHICH tests lost the race
+   *  changed from run to run (B1/B2/B3/B5/B16a, then B5/B12/B23b, then
+   *  B1/B5/B13d/B14c/B23a), and each one passed when run alone. That moving
+   *  target is what made one scheduling problem look like five bugs.
+   *
+   *  Raise the budget for the file rather than chase the symptom per test. */
+  test.describe.configure({ timeout: 120_000 });
+
 
   /** ---------------------------------------------------------------- */
   /** B1: Add 3 agents under 3 different parents → activate → all 3 land */
@@ -65,8 +105,7 @@ test.describe("bug hunt — composition + edge cases", () => {
     }
 
     const result = await activate(request, id);
-    // Base 34 + 3 added = 37
-    expect(result.inserted.agents).toBe(37);
+    expect(result.inserted.agents).toBe(BASE_AGENTS + 3);
 
     const agents = await fetchAgents(request, id);
     expect(agents.find((a) => a.slot === "cmo.ppc-strategist")?.templateId).toBe("ppc-strategist");
@@ -96,7 +135,7 @@ test.describe("bug hunt — composition + edge cases", () => {
 
     // Activate should have both
     const result = await activate(request, id);
-    expect(result.inserted.agents).toBe(36);
+    expect(result.inserted.agents).toBe(BASE_AGENTS + 2);
 
     await request.delete(`/api/instance/${id}/reset`);
   });
@@ -121,7 +160,7 @@ test.describe("bug hunt — composition + edge cases", () => {
     expect(swapR.ok()).toBe(true);
 
     const result = await activate(request, id);
-    expect(result.inserted.agents).toBe(35);
+    expect(result.inserted.agents).toBe(BASE_AGENTS + 1);
 
     const agents = await fetchAgents(request, id);
     const swapped = agents.find((a) => a.slot === added.slot);
@@ -173,12 +212,30 @@ test.describe("bug hunt — composition + edge cases", () => {
   /** ---------------------------------------------------------------- */
   /** B5: Reset wipes template_overlays + template_additions + DB rows */
   test("B5: reset wipes overlays + additions + DB", async ({ request }) => {
+    // The heaviest test in this file: it is the only one that seeds AND
+    // activates twice (once to make changes, once after the reset to prove
+    // nothing survived). That does not fit Playwright's 30s default, and
+    // when it overran the fixture was torn down mid-call and the failure
+    // surfaced as the misleading "apiRequestContext.post: Request context
+    // disposed" rather than as a timeout.
+    test.slow();
     const id = uniqueId("bh-reset-wipe");
     await seedFinalized(request, id);
 
-    // Add operator changes
+    // Add operator changes.
+    //
+    // The sentinel must be a template the SELECTION MATRIX cannot itself
+    // choose for this slot, or the assertion below cannot tell "the
+    // operator's overlay survived the reset" from "the matrix picked it".
+    // This used "prompt-engineer", which is in candidates.ts's list for
+    // cdo.signal (ai-engineer, prompt-engineer, mlops-engineer,
+    // reality-checker, data-engineer) — and the matrix now selects exactly
+    // that for this fixture's stage + GTM profile, so the test failed on a
+    // correct system. "ppc-strategist" is a marketing template that appears
+    // in no cdo.signal candidate list, so only an overlay can produce it.
+    const SWAP_SENTINEL = "ppc-strategist";
     await request.post(`/api/instance/${id}/swap-template`, {
-      data: { slot: "cdo.signal", templateId: "prompt-engineer" },
+      data: { slot: "cdo.signal", templateId: SWAP_SENTINEL },
     });
     await request.post(`/api/instance/${id}/add-agent`, {
       data: { parent_slot: "cmo", template_id: "tiktok-strategist" },
@@ -187,7 +244,7 @@ test.describe("bug hunt — composition + edge cases", () => {
 
     // Pre-reset: changes in DB
     const beforeAgents = await fetchAgents(request, id);
-    expect(beforeAgents.find((a) => a.slot === "cdo.signal")?.templateId).toBe("prompt-engineer");
+    expect(beforeAgents.find((a) => a.slot === "cdo.signal")?.templateId).toBe(SWAP_SENTINEL);
     expect(beforeAgents.find((a) => a.slot === "cmo.tiktok-strategist")).toBeDefined();
 
     // Reset
@@ -204,9 +261,10 @@ test.describe("bug hunt — composition + edge cases", () => {
     await seedFinalized(request, id);
     await activate(request, id);
     const reactivated = await fetchAgents(request, id);
-    // Should be base 34, not 35 (no leftover addition) and cdo.signal should NOT be prompt-engineer
-    expect(reactivated.length).toBe(34);
-    expect(reactivated.find((a) => a.slot === "cdo.signal")?.templateId).not.toBe("prompt-engineer");
+    // Should be the base roster, with no leftover addition, and cdo.signal
+    // should NOT be prompt-engineer.
+    expect(reactivated.length).toBe(BASE_AGENTS);
+    expect(reactivated.find((a) => a.slot === "cdo.signal")?.templateId).not.toBe(SWAP_SENTINEL);
 
     await request.delete(`/api/instance/${id}/reset`);
   });
@@ -568,11 +626,27 @@ test.describe("bug hunt — composition + edge cases", () => {
     await request.delete(`/api/instance/${id}/reset`);
   });
 
-  /** B16a: token-usage endpoint returns 404 before any T2 call */
-  test("B16a: GET /token-usage returns 404 for fresh company", async ({ request }) => {
+  /** B16a: token-usage returns a ZEROED aggregate before any T2 call.
+   *
+   *  This asserted 404 until the route deliberately stopped doing that.
+   *  packages/wavex-os-server/src/routes/token-usage.ts says so in its own
+   *  header: "Previously this branch returned 404, which the UI swallowed
+   *  but the browser still logged to the console, producing visible '404'
+   *  noise after a Reset where the TokenCounter polls every 5s." The
+   *  contract changed on purpose and the test was never updated. */
+  test("B16a: GET /token-usage returns a zeroed aggregate for a fresh company", async ({ request }) => {
     const id = uniqueId("bh-token-empty");
     const r = await request.get(`/api/instance/${id}/token-usage`);
-    expect(r.status()).toBe(404);
+    expect(r.status()).toBe(200);
+    const j = await r.json();
+    expect(j.ok).toBe(true);
+    // Zeroed, not merely present — a non-zero total here would mean the
+    // aggregate leaked from another company.
+    expect(j.usage.companyId).toBe(id);
+    expect(j.usage.total.input_tokens).toBe(0);
+    expect(j.usage.total.output_tokens).toBe(0);
+    expect(j.usage.total.calls).toBe(0);
+    expect(j.usage.recent_calls).toEqual([]);
   });
 
   /** B17a: ETA endpoint returns defaults when no history exists */
@@ -676,7 +750,7 @@ test.describe("bug hunt — composition + edge cases", () => {
         manual_context: "KeysCo is an e2e fixture company for verifying that the credential concierge endpoint exposes per-connector keysUrl deep links to the operator.",
       },
     });
-    await request.post(`${API}/wavex-os/onboarding/pillar/2`, { data: { companyId: id, claude_plan: "max_5x" } });
+    await request.post(`${API}/wavex-os/onboarding/pillar/2`, { data: { companyId: id, claude_plan: "max_5x", skipInference: true } });
     await request.post(`${API}/wavex-os/onboarding/pillar/3`, { data: { companyId: id, product_state: "live_paying_customers", stage: "10k_100k_mrr" } });
     await request.post(`${API}/wavex-os/onboarding/pillar/4`, { data: { companyId: id, lead_sources: ["outbound_cold"], sales_motion: "assisted_demo", close_channel: "mostly_phone_video" } });
     await request.post(`${API}/wavex-os/onboarding/pillar/5`, { data: { companyId: id, comm_channel: "telegram", urgency_routing: "all_to_one_channel" } });
@@ -938,7 +1012,7 @@ test.describe("bug hunt — composition + edge cases", () => {
         manual_context: "CoSCo is an e2e fixture for verifying the kernel-slot injection adds Chief of Staff to the swarm manifest under CEO.",
       },
     });
-    await request.post(`${API}/wavex-os/onboarding/pillar/2`, { data: { companyId: id, claude_plan: "max_5x" } });
+    await request.post(`${API}/wavex-os/onboarding/pillar/2`, { data: { companyId: id, claude_plan: "max_5x", skipInference: true } });
     await request.post(`${API}/wavex-os/onboarding/pillar/3`, { data: { companyId: id, product_state: "live_paying_customers", stage: "10k_100k_mrr" } });
     await request.post(`${API}/wavex-os/onboarding/pillar/4`, { data: { companyId: id, lead_sources: ["outbound_cold"], sales_motion: "assisted_demo", close_channel: "mostly_phone_video" } });
     await request.post(`${API}/wavex-os/onboarding/pillar/5`, { data: { companyId: id, comm_channel: "telegram", urgency_routing: "all_to_one_channel" } });
@@ -980,7 +1054,7 @@ test.describe("bug hunt — composition + edge cases", () => {
         manual_context: "Fixture for verifying that calling swarm-manifest twice doesn't duplicate the kernel-injected Chief of Staff slot.",
       },
     });
-    await request.post(`${API}/wavex-os/onboarding/pillar/2`, { data: { companyId: id, claude_plan: "max_5x" } });
+    await request.post(`${API}/wavex-os/onboarding/pillar/2`, { data: { companyId: id, claude_plan: "max_5x", skipInference: true } });
     await request.post(`${API}/wavex-os/onboarding/pillar/3`, { data: { companyId: id, product_state: "live_paying_customers", stage: "10k_100k_mrr" } });
     await request.post(`${API}/wavex-os/onboarding/pillar/4`, { data: { companyId: id, lead_sources: ["outbound_cold"], sales_motion: "assisted_demo", close_channel: "mostly_phone_video" } });
     await request.post(`${API}/wavex-os/onboarding/pillar/5`, { data: { companyId: id, comm_channel: "telegram", urgency_routing: "all_to_one_channel" } });
