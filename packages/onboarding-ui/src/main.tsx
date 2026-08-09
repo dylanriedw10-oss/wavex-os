@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import MissionControl from "./pages/MissionControl";
+import { Entry } from "./pages/Entry";
 import Pricing from "./pages/Pricing";
 import TonyApplePricing from "./pages/TonyApplePricing";
 import DesignPartners from "./pages/DesignPartners";
@@ -69,7 +70,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 they did before the inversion. Remove the wrapper when the
                 surface is redesigned — Mission Control's rebuild is scoped
                 in docs/MISSION_CONTROL_SALVAGE.md. */}
-            <Route path="/" element={<Legacy><MissionControl /></Legacy>} />
+            {/* The front door. A first-run operator (no companies at all)
+                goes straight to /build — the onboarding surface — instead of
+                landing on a dashboard with nothing in it. Everyone else gets
+                Mission Control. See pages/Entry.tsx. */}
+            <Route path="/" element={<Entry><Legacy><MissionControl /></Legacy></Entry>} />
             {/* CUTOVER: both legacy onboarding entrances now land on Build
                 Your Organization. The query string is PRESERVED — every
                 inbound link carries ?companyId=, and dropping it would strand
