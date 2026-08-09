@@ -104,6 +104,23 @@ export default function BuildOrgPage() {
       });
       dispatch({ type: "REMOVE_MESSAGE", id: thinkingId });
       dispatch({ type: "PILLAR1_RESPONSE", response: result.response, rawInput, orgName: slug });
+      // Said BEFORE the inference, because it changes how the inference
+      // should be read: if the site was not reached, everything below came
+      // from the operator's own words and nothing from the address they
+      // pasted. `url_fetch` is absent when they typed prose — that is not a
+      // failure and must stay silent.
+      if (result.url_fetch && result.url_fetch.status !== "ok") {
+        const line = COPY.phase1.urlNotRead[result.url_fetch.status];
+        if (line) {
+          dispatch({
+            type: "ADD_MESSAGE",
+            message: {
+              role: "assistant",
+              text: `${line(result.url_fetch.url)} ${COPY.phase1.urlNotReadTail}`,
+            },
+          });
+        }
+      }
       dispatch({
         type: "ADD_MESSAGE",
         message: { role: "assistant", text: COPY.phase1.inferred, slot: { kind: "pillar1-confirm", response: result.response } },

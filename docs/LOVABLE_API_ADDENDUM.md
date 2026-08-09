@@ -190,10 +190,25 @@ State these as gaps rather than building fiction around them.
 - **`health` is frequently `null`** on real nodes (verified: the company node
   and every department in a seeded org). `null` is *unknown*, not healthy — do
   not default it to teal.
-- **No Evidence/Hypothesis/Confidence objects.** Brief §4's investigation
-  anatomy is richer than the wire format: there is `answer`, `decision`, and
-  memory entries. **Confidence is not a field anywhere.** Do not render "76%
-  confidence" from nothing — that is §10's "AI theater" verbatim.
+- **No Evidence or Hypothesis objects.** Brief §4's investigation anatomy is
+  richer than the wire format: there is `answer`, `decision`, and memory
+  entries, and no structure that carries a hypothesis as its own thing.
+
+- **Confidence exists, but it is ORDINAL, not numeric.**
+  *(Correction — an earlier revision of this file said "confidence is not a
+  field anywhere". That was wrong, and it was wrong in the direction that
+  matters: it would have licensed removing a real signal.)*
+  `packages/wavex-os-server/src/research/types.ts:43` declares
+  `confidence: "high" | "medium" | "low"` on every research finding.
+  `parse.ts:171` DEFAULTS it to `"medium"` when the model omits it, and
+  `parse.ts:179` sorts findings by it.
+
+  So brief §4's "Confidence (a number, not a vibe)" **cannot be satisfied as
+  written** — what the system has is precisely a vibe. Render the word.
+  Rendering `76%` would be inventing precision the system never had, which
+  is §10's AI-theater rule. And render it as TEXT: shipping it as a colour
+  alone collapses `medium` and `low` into one appearance and says nothing to
+  a screen reader.
 - **No agent roster endpoint by design**, matching §1's "the frontend never
   surfaces the roster" — though `kind: "agent"` nodes do exist (see §5).
 - `/api/instance/:id/org/investigations/recent` returned `steps: []` on a
@@ -222,9 +237,10 @@ The remaining forks in §13 are unaffected by anything here.
 
 1. **Never invent an endpoint.** If a surface needs data not listed here, render
    the empty state and flag it — do not mock a route.
-2. **Never fabricate confidence, momentum, or evidence counts.** They are not on
-   the wire. §10 forbids it and §4's "a number, not a vibe" cannot be satisfied
-   by inventing the number.
+2. **Never fabricate momentum or evidence counts, and never numeric
+   confidence.** Momentum is permanently `null` and there is no evidence
+   count. Research findings DO carry `high | medium | low` — render that word,
+   never a percentage derived from it.
 3. `ok: false` is a first-class render path, not an exception. Brief §6: errors
    preserve the workspace.
 4. Long waits are real (~20s on pillar/1, up to 60s on activate). §6's

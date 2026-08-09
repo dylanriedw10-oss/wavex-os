@@ -33,6 +33,10 @@ function Row({ u, i, animate }: { u: PlanUnit; i: number; animate: boolean }) {
         animation: animate ? `cv-appear 160ms var(--ease) both ${i * 40}ms` : undefined,
       }}
     >
+      {/* The dot stays decorative and stays aria-hidden; the WORD beside the
+          claim is what actually carries the confidence. Colour alone lost two
+          of the three server values — `medium` and `low` both fell through to
+          `--border` — and said nothing at all to a screen reader. */}
       <span aria-hidden style={{
         width: 6, height: 6, borderRadius: "50%", flexShrink: 0, marginTop: 6,
         background: f.confidence === "high" ? "var(--mind)" : "var(--border)",
@@ -48,7 +52,12 @@ function Row({ u, i, animate }: { u: PlanUnit; i: number; animate: boolean }) {
             </span>
           )}
         </div>
-        <div className="text-dim" style={{ fontSize: "var(--text-xs)", overflowWrap: "anywhere" }}>{f.claim}</div>
+        <div className="text-dim" style={{ fontSize: "var(--text-xs)", overflowWrap: "anywhere" }}>
+          {f.claim}
+          {COPY.plan.research.confidence[f.confidence] && (
+            <> · {COPY.plan.research.confidence[f.confidence]}</>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -133,6 +133,21 @@ export interface CompaniesResponse {
   companies: Array<{ id: string; name: string; state: CompanyState; updatedAt: string | null }>;
 }
 
+/** What the server's URL prefetch actually did, when `raw_input` was a link.
+ *
+ *  ABSENT when the operator typed prose — "no URL was given" and "the URL
+ *  failed" are different facts and only one is worth telling them about.
+ *  A non-`ok` status means the plan was built WITHOUT reading the site;
+ *  saying nothing there is the silent degradation this type exists to end.
+ *  Server side: packages/wavex-os-server/src/lib/url-prefetch.ts. */
+export type UrlFetchStatus = "ok" | "parked" | "thin" | "unreachable" | "timeout" | "unsafe_url";
+
+export interface UrlFetchReport {
+  url: string;
+  status: UrlFetchStatus;
+  reason: string | null;
+}
+
 export const wavexOsOnboardingApi = {
   // Status
   status: (companyId: string) =>
@@ -144,7 +159,7 @@ export const wavexOsOnboardingApi = {
     org_name: string;
     raw_input: string;
     manual_context?: string;
-  }) => call<{ ok: true; response: Pillar1Response }>(
+  }) => call<{ ok: true; response: Pillar1Response; url_fetch?: UrlFetchReport }>(
     "POST", "/wavex-os/onboarding/pillar/1", input,
   ),
 

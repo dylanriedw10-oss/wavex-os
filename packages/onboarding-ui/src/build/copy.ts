@@ -60,6 +60,25 @@ export const COPY = {
     p4: "How you sell.",
     p5: "How the board reaches you.",
     done: "That's reality mapped. Now the plan.",
+    /** The link was not read, and the operator is told so.
+     *
+     *  The server has always known this — url-prefetch returns a status per
+     *  attempt — but nothing rendered it, so an operator pasted their
+     *  homepage, waited out a real enrichment call, and got an organization
+     *  built from their typed words alone with no indication the site
+     *  contributed nothing. The plan is not wrong; it is just narrower than
+     *  they believe, and believing otherwise is the failure.
+     *
+     *  Keyed by status, because "parked" and "timeout" are different facts
+     *  and a single "couldn't read it" would flatten them back down. */
+    urlNotRead: {
+      parked: (url: string) => `${url} is a parked domain — there's no company on it to read.`,
+      thin: (url: string) => `${url} had almost no readable text on it.`,
+      unreachable: (url: string) => `${url} didn't answer.`,
+      timeout: (url: string) => `${url} stopped responding partway through.`,
+      unsafe_url: (url: string) => `${url} isn't a public address I can reach.`,
+    } as Record<string, (url: string) => string>,
+    urlNotReadTail: "So everything below comes from what you told me — nothing in it came from that address.",
   },
 
   /** Strategy — the ONLY place intent enters the system.
@@ -115,6 +134,20 @@ export const COPY = {
       none: "Nothing newly possible turned up beyond what you told me — the plan below uses your answers.",
       unavailable: "I couldn't research beyond what you told me — the plan below uses your answers alone.",
       applied: "used by the plan",
+      /** The finding's confidence, as WORDS.
+       *
+       *  This was a coloured dot and nothing else: `--mind` for high, and
+       *  `--border` for everything below it. Three server values collapsed
+       *  into two colours, so MEDIUM AND LOW WERE INDISTINGUISHABLE, the dot
+       *  was aria-hidden so a screen reader got nothing, and with colour
+       *  removed the signal vanished entirely — against this repo's own token
+       *  rule that every status colour ships a text label.
+       *
+       *  Worded, not numeric, because the source is ordinal:
+       *  research/types.ts declares `"high" | "medium" | "low"` and parse.ts
+       *  DEFAULTS to "medium" when the model omits it. A percentage here
+       *  would invent precision the system never had. */
+      confidence: { high: "confident", medium: "fairly sure", low: "unsure" } as Record<string, string>,
       recordTitle: "Everything I read",
       recordBack: "Back to the plan",
     },
