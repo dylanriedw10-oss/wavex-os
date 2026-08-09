@@ -55,10 +55,45 @@ and `/onboarding-chat` to `/build`; and `WavexOsOnboarding` — the host that
 mounts all of it — has **zero import sites** in source. Unrouted and unmounted
 is the same as deleted. A grep alone will tell you the opposite.
 
-Beware one name collision: `main.tsx:47` mounts a component *called*
+Beware one name collision: `main.tsx` used to mount a component *called*
 `OnboardingWizard` outside `<Routes>`. That is a different thing — a 3-step
 new-user overlay ("Connect your repo" / "Connect your workspace" / "Run your
-first smoke test"). `wizard-title.spec.ts` covers it and is **live**.
+first smoke test").
+
+**Update — that overlay is now orphaned too, by the same rule.** It is
+unmounted from `main.tsx`; the component and its server routes are intact on
+disk. Reason: mounted outside `<Routes>` and gated on `is_new_user`, it
+rendered above every surface, so a brand-new operator's FIRST screen was
+"Connect your repo" rather than the build flow. Onboarding is `/build` —
+chat left, canvas right — always, and two "STEP 1 OF n" wizards in front of
+each other is what this cutover existed to remove.
+
+It stayed invisible for a long time for a reason worth keeping: `/api/users/me`
+was returning 500 (four migrations were missing from the drizzle journal) and
+the component's `.catch()` read that as "no backend, skip wizard". The overlay
+never rendered for anyone, so the collision only appeared once the backend was
+repaired. A silent fallback hid it, not a subtle interaction.
+
+**What that cost, named rather than tabled away.** `OnboardingWizard` was the
+only UI that wrote `users.wizard_repo` and the only thing that triggered a
+smoke-test run (`QaCelebrationController` only *reads* status and is still
+mounted). `PATCH /api/users/:id/wizard-repo` and `POST /api/smoke-test/trigger`
+still exist and still work — the capability lost its entry point, not its
+implementation. Repo connection and the first smoke test are worth having;
+they belong inside the build flow rather than in front of it.
+
+Retired with it:
+
+| spec | covered | why it went |
+|---|---|---|
+| `wizard-title.spec.ts` | the overlay retitling the browser tab per step | asserts the overlay renders on `/`; it no longer mounts |
+| `wizard-backend-failure.spec.ts` | that a *broken* backend logs while an *absent* one stays quiet | exercised the overlay's `users/me` handling — with it unmounted the spec could not fail, and a test that cannot fail is worse than none |
+| `wizard-does-not-gate-build.spec.ts` | the overlay not covering `/build` | superseded by `onboarding-is-build.spec.ts`, which asserts the stronger thing |
+
+The fail-open fix `wizard-backend-failure.spec.ts` guarded is still in
+`OnboardingWizard.tsx` — a 5xx logs, a rejected fetch does not. It is
+uncovered while the component is unmounted; re-cover it if the component
+returns.
 
 **Honest note on what was lost.** v2–v6 covered welcome-screen affordances
 that have no successor because the screen has no successor — that coverage did

@@ -11,7 +11,6 @@ import CanvasPage from "./canvas/CanvasPage";
 import BuildOrgPage from "./build/BuildOrgPage";
 import { ReasoningCanvas } from "./reasoning/ReasoningCanvas";
 import { CompanyProvider } from "./wavex-os/lib/CompanyContext";
-import { OnboardingWizard } from "./wavex-os/components/OnboardingWizard";
 import { QaCelebrationController } from "./wavex-os/components/QaCelebrationController";
 import { AvatarDashboard } from "./pages/AvatarDashboard";
 import { AvatarSettings } from "./pages/AvatarSettings";
@@ -44,7 +43,24 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <CompanyProvider>
-          <OnboardingWizard />
+          {/* ORPHANED, not deleted: the 3-step operator overlay
+              (OnboardingWizard — "Connect your repo" / "Connect your
+              workspace" / "Run your first smoke test"). It predates the
+              cutover and was never unmounted, so while is_new_user=true it
+              rendered above <Routes> on every surface and a brand-new
+              operator's FIRST screen was "Connect your repo" rather than the
+              build flow. Onboarding is /build: chat on the left, canvas on
+              the right, always. Two "STEP 1 OF n" wizards in front of each
+              other is what the cutover existed to remove.
+
+              It was invisible until the migration journal was repaired —
+              /api/users/me was 500ing and the component's catch read that as
+              "no backend" — so this collision is younger than it looks.
+
+              The component and its server routes are intact. Repo
+              connection and the first smoke test are worth having; they
+              belong INSIDE the build flow, not in front of it. See
+              e2e/RETIRED.md. */}
           <QaCelebrationController />
           <Routes>
             {/* `.legacy-dark` marks the surfaces NOT yet standardized on the
