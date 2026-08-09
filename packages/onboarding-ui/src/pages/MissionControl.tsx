@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { Session } from "@supabase/supabase-js";
 import { HealthStrip } from "../components/mission/HealthStrip";
@@ -60,25 +60,21 @@ export default function MissionControl() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
-  // Fresh-install redirect: when the customer has zero companies AND none
-  // selected, the canonical landing is the chat-first onboarding gateway
-  // (Avatar / Solo Founder / Hybrid), not Mission Control's empty state.
-  // Once they finish onboarding their first company, this naturally stops
-  // firing (companies.length > 0). Probing companies via the same query the
-  // CompanyPicker uses keeps cache-coherence; we wait for the result before
-  // deciding (the !isFetching gate avoids a flash of redirect-then-not).
-  const companiesQ = useQuery<CompaniesPayload>({
-    queryKey: ["companies"],
-    queryFn: async () => {
-      const r = await fetch("/api/companies");
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
-    },
-  });
-  const hasZeroCompanies = companiesQ.isSuccess && (companiesQ.data?.companies ?? []).length === 0;
-  if (!companyId && hasZeroCompanies) {
-    return <Navigate to="/build" replace />;
-  }
+  // The fresh-install redirect used to live HERE, as a conditional
+  // `return <Navigate to="/build" />` sitting above the two hooks below.
+  // That is a hooks violation: on the render where it fired React saw fewer
+  // hooks than the render before, and the component crashed with "Rendered
+  // fewer hooks than expected". Reachable in practice — delete your last
+  // company while on this page and the query flips to zero under you.
+  //
+  // Not hoisted above the hooks, because the rule no longer belongs to this
+  // component at all: pages/Entry.tsx decides at `/` whether a first-run
+  // operator sees the build flow or Mission Control, and it decides BEFORE
+  // this renders. Keeping a second copy here meant two owners for one rule,
+  // one duplicate /api/companies fetch on every Mission Control render, and
+  // the only one of the two that could crash.
+  //
+  // Every hook in this component is now unconditional.
 
   // Phase 7-B — first-run walkthrough for Mission Control.
   const tour = useCoachmark("coachmark-mission-v1");
