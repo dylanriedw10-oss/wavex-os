@@ -20,7 +20,7 @@ import {
 } from "@wavex-os/plugin-onboarding";
 import type { Pillar1Response } from "@wavex-os/plugin-onboarding";
 import { route as tierRoute } from "@wavex-os/plugin-tier-router";
-import { fetchPage } from "../lib/url-prefetch.js";
+import { fetchPage, type FetchStatus } from "../lib/url-prefetch.js";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
 import { getInferenceMode, getClaudeBin } from "@wavex-os/inference-adapter";
 import { withTokenAccounting, type PhaseKey } from "../lib/token-accounting.js";
@@ -204,17 +204,39 @@ function looksLikeUrl(s: string): boolean {
   return /^https?:\/\//i.test(t) || /^(?:[\w-]+\.)+[\w]{2,}(\/|$)/i.test(t);
 }
 
-async function fetchUrlContent(rawInput: string): Promise<string | null> {
-  if (!looksLikeUrl(rawInput)) return null;
+/** What the prefetch did, kept alongside what it produced.
+ *
+ *  `attempted: false` means the operator typed prose, not a URL — there is
+ *  nothing to report. Otherwise the status is the fetcher's own verdict. */
+export type UrlFetchOutcome =
+  | { attempted: false }
+  | { attempted: true; url: string; status: FetchStatus; reason: string | null; content: string | null };
+
+async function fetchUrlContent(rawInput: string): Promise<UrlFetchOutcome> {
+  if (!looksLikeUrl(rawInput)) return { attempted: false };
   // The hardened fetcher (lib/url-prefetch.ts): SSRF host filter, one-hop
   // meta-refresh follow, parked-domain + thin-content detection. The old
   // inline fetch here had none of those — a parked domain fed the model
   // "buy this domain" prose and it confidently invented a company from it.
-  // The null contract is unchanged: any non-ok outcome degrades to the
-  // no-homepage prompt path.
+  //
+  // The null CONTENT contract is unchanged: any non-ok outcome still degrades
+  // to the no-homepage prompt path, which is correct. What changed is that
+  // the STATUS survives. It used to be discarded here, so unreachable /
+  // parked / thin / timeout / unsafe_url were indistinguishable from "the
+  // operator typed prose" by the time anything could report it — and the UI
+  // has no copy for any of them. An operator pasted their homepage, waited
+  // for a real enrichment call, and got an organization built entirely from
+  // whatever else they had typed, never told the site was not read. That is
+  // a silent degradation, not a fast path.
   const page = await fetchPage(rawInput);
-  if (page.status !== "ok" || !page.body) return null;
-  return page.body.slice(0, COMBINED_URL_CONTENT_MAX);
+  const usable = page.status === "ok" && !!page.body;
+  return {
+    attempted: true,
+    url: page.url,
+    status: page.status,
+    reason: page.reason ?? null,
+    content: usable ? page.body!.slice(0, COMBINED_URL_CONTENT_MAX) : null,
+  };
 }
 
 function buildCombinedEnrichmentPrompt(opts: {
@@ -481,7 +503,15 @@ export function registerPillarRoutes(app: FastifyInstance): void {
       // cutting latency from ~85s P50 to ~25s by sending pre-fetched content
       // instead of asking Claude to browse the web (reasoning_depth: shallow
       // vs. deep, timeout 45s vs. 180s).
-      const urlContent = await fetchUrlContent(body.raw_input).catch(() => null);
+      const urlFetch: UrlFetchOutcome = await fetchUrlContent(body.raw_input)
+        .catch(() => ({ attempted: false }) as UrlFetchOutcome);
+      const urlContent = urlFetch.attempted ? urlFetch.content : null;
+      // Reported on the envelope, never folded into `response`: `response` is
+      // the vendored Pillar1Response shape and this is a fact about the
+      // FETCH, not about the company.
+      const urlReport = urlFetch.attempted
+        ? { url_fetch: { url: urlFetch.url, status: urlFetch.status, reason: urlFetch.reason } }
+        : {};
       const combined = await runCombinedPillar1Enrichment({
         orgName: body.org_name,
         rawInput: body.raw_input,
@@ -516,7 +546,7 @@ export function registerPillarRoutes(app: FastifyInstance): void {
           }).catch(() => null);
           if (byoc) {
             await updatePillar(body.companyId, "pillar_1", byoc);
-            return { ok: true, response: byoc };
+            return { ok: true, response: byoc, ...urlReport };
           }
           // BYOC also unavailable: fall through to vendor heuristics below.
         }
@@ -530,7 +560,7 @@ export function registerPillarRoutes(app: FastifyInstance): void {
       }
 
       await updatePillar(body.companyId, "pillar_1", final);
-      return { ok: true, response: final };
+      return { ok: true, response: final, ...urlReport };
     });
   });
 

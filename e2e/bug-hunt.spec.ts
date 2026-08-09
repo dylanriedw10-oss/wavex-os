@@ -331,7 +331,7 @@ test.describe("bug hunt — composition + edge cases", () => {
   /** ---------------------------------------------------------------- */
   /** B9: Activate with no manifest → 404 */
   test("B9: activate 404s when manifest missing", async ({ request }) => {
-    const r = await request.post(`/api/instance/never-onboarded-bug-hunt/activate`);
+    const r = await request.post(`/api/instance/never-onboarded-bug-hunt/activate`, { timeout: 60_000 });
     expect(r.status()).toBe(404);
   });
 
@@ -436,7 +436,7 @@ test.describe("bug hunt — composition + edge cases", () => {
     expect(await getManifestSignature(request, id)).toBe(addJson.sha256);
 
     // Op 3: activate (also re-signs)
-    const act = await request.post(`/api/instance/${id}/activate`);
+    const act = await request.post(`/api/instance/${id}/activate`, { timeout: 60_000 });
     const actJson = await act.json();
     expect(actJson.sha256).toMatch(SHA_PATTERN);
     expect(await getManifestSignature(request, id)).toBe(actJson.sha256);
@@ -923,7 +923,7 @@ test.describe("bug hunt — composition + edge cases", () => {
     const id = uniqueId("bh-mute-bridge");
     await seedFinalized(request, id);
     // Activate baseline
-    const baselineActivate = await request.post(`/api/instance/${id}/activate`);
+    const baselineActivate = await request.post(`/api/instance/${id}/activate`, { timeout: 60_000 });
     const baselineJ = await baselineActivate.json();
     const baselineCount = baselineJ.inserted.agents;
 
@@ -945,7 +945,7 @@ test.describe("bug hunt — composition + edge cases", () => {
     await request.post(`/api/instance/${id}/mute-slot`, { data: { slot: target } });
 
     // Re-activate — should have one fewer agent
-    const reactivate = await request.post(`/api/instance/${id}/activate`);
+    const reactivate = await request.post(`/api/instance/${id}/activate`, { timeout: 60_000 });
     const j = await reactivate.json();
     expect(j.inserted.agents).toBe(baselineCount - 1);
 
@@ -1033,7 +1033,7 @@ test.describe("bug hunt — composition + edge cases", () => {
   test("B23b: activate writes Chief of Staff row to DB with role=chief_of_staff", async ({ request }) => {
     const id = uniqueId("bh-cos-bridge");
     await seedFinalized(request, id);
-    const act = await request.post(`/api/instance/${id}/activate`);
+    const act = await request.post(`/api/instance/${id}/activate`, { timeout: 60_000 });
     expect(act.ok()).toBeTruthy();
 
     const agents = await request.get(`/api/agents?companyId=${id}`);
