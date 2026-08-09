@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { userApi, smokeTestApi, type SmokeTestPhase } from "../lib/api";
+import { ApiError, userApi, smokeTestApi, type SmokeTestPhase } from "../lib/api";
 import { Step2PlatformCard, type PlatformTarget } from "./Step2PlatformCard";
 import { GitHubRepoStep } from "./GitHubRepoStep";
 
@@ -366,8 +366,35 @@ export function OnboardingWizard() {
           setVisible(true);
         }
       })
-      .catch(() => {
-        // /api/users/me unavailable (e.g. dev without mock-core) — skip wizard.
+      .catch((err: unknown) => {
+        // Two very different failures used to land here identically, and the
+        // silence hid a real one: /api/users/me returned 500 because a
+        // migration had never been applied, this catch read it as "no
+        // backend", and NO new operator was onboarded at all. Nothing was
+        // logged and the app looked healthy.
+        //
+        // The two cases ARE distinguishable, so distinguish them:
+        //
+        //   no status  — fetch itself rejected. The backend is absent, which
+        //                is the expected dev-without-mock-core case this
+        //                catch was written for. Stay quiet.
+        //   a status   — the backend answered, badly. That is a DEFECT and it
+        //                must be loud.
+        //
+        // Skipping stays the behaviour either way, and deliberately: when the
+        // call fails we cannot know whether this operator is new, and showing
+        // setup to a returning operator is worse than showing it to nobody.
+        // The bug was never the fallback — it was the silence.
+        const status = err instanceof ApiError ? err.status : undefined;
+        if (status === undefined) return;
+        const detail = `HTTP ${status} — new-operator setup is being skipped for everyone until this is fixed`;
+        if (status >= 500) {
+          console.error(`[onboarding] GET /api/users/me failed: ${detail}`, err);
+        } else {
+          // 4xx: usually a backend too old to serve the route. Still not
+          // silent — it has the same effect on the operator.
+          console.warn(`[onboarding] GET /api/users/me refused: ${detail}`, err);
+        }
       })
       .finally(() => setLoading(false));
 
