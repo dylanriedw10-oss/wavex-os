@@ -15,7 +15,7 @@ const CHIP: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 6,
   borderRadius: 9, padding: "4px 12px", minHeight: 28,
   fontSize: "var(--text-xs)", color: "var(--text-dim)",
-  border: "1px solid rgba(0,0,0,0.08)", background: "var(--panel)",
+  border: "1px solid var(--edge)", background: "var(--panel)",
 };
 
 export function CompanyCore({ companyId, pillar1, stageLabel, facePx, onAdopt, showAdopt }: {

@@ -71,13 +71,17 @@ export function ConnectorConstellation({ companyId, companyTitle, onOpenDrawer, 
       <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
         {/* the orbit hairline */}
         <svg width={size} height={size} aria-hidden style={{ position: "absolute", inset: 0 }}>
-          <circle cx={c} cy={c} r={R} fill="none" stroke="rgba(0,0,0,0.07)" strokeWidth={1} strokeDasharray="2 6" />
+          <circle cx={c} cy={c} r={R} fill="none" stroke="var(--edge)" strokeWidth={1} strokeDasharray="2 6" />
         </svg>
         {/* the core */}
         <div className="cv-glass cv-glass--solid" style={{
           position: "absolute", left: c - 56, top: c - 56, width: 112, height: 112,
           borderRadius: "50%", display: "grid", placeItems: "center", textAlign: "center",
-          background: "radial-gradient(120% 120% at 50% 28%, #FFFFFF 40%, #F0EFEA 100%)",
+          // Paper fading to the ground it sits on. #F0EFEA was eyeballed and
+          // is equidistant from --void and --panel-2 (both differ by 4,4,5),
+          // so the tie is broken on intent: a raised cell falls off toward
+          // the canvas ground, which is --void.
+          background: "radial-gradient(120% 120% at 50% 28%, var(--panel) 40%, var(--void) 100%)",
         }}>
           <span style={{ fontWeight: 600, fontSize: "var(--text-sm)", maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis" }}>
             {companyTitle}
@@ -105,8 +109,8 @@ export function ConnectorConstellation({ companyId, companyTitle, onOpenDrawer, 
               }}>
               <span style={{
                 width: 34, height: 34, borderRadius: "50%", display: "grid", placeItems: "center",
-                background: done ? "color-mix(in srgb, var(--good) 10%, #FFFFFF)" : "var(--panel)",
-                border: done ? "1.5px solid color-mix(in srgb, var(--good) 45%, transparent)" : "1.5px dashed rgba(0,0,0,0.22)",
+                background: done ? "color-mix(in srgb, var(--good) 10%, var(--panel))" : "var(--panel)",
+                border: done ? "1.5px solid color-mix(in srgb, var(--good) 45%, transparent)" : `1.5px dashed color-mix(in srgb, var(--ink) 22%, transparent)`,
                 transition: "border 200ms var(--ease), background 200ms var(--ease)",
               }}>
                 {done

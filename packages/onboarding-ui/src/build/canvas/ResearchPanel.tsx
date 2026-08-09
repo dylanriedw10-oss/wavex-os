@@ -15,8 +15,10 @@
  *  claim about the operator's own business is the same lie as a truncated
  *  fact under review. */
 
+import type React from "react";
 import { useState } from "react";
 import { fitRows, regionBudget, useMeasuredHeight } from "../../canvas/layout";
+import { useDescendFocus } from "../lib/descend-focus";
 import type { PlanUnit } from "../orchestration/plan-feed";
 import { COPY } from "../copy";
 
@@ -65,12 +67,21 @@ function Row({ u, i, animate }: { u: PlanUnit; i: number; animate: boolean }) {
 
 /** The descend target: every finding, in full, in the one place allowed to
  *  scroll. A clamp must never descend into another clamp. */
-function Record({ units, onBack }: { units: PlanUnit[]; onBack: () => void }) {
+function Record({ units, onBack, landingRef }: {
+  units: PlanUnit[];
+  onBack: () => void;
+  /** Focus lands here on descend — see lib/descend-focus.ts. */
+  landingRef?: React.Ref<HTMLHeadingElement>;
+}) {
   return (
     <div className="cv-paper" style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", padding: "var(--space-4)", gap: "var(--space-3)" }}>
       <div style={{ flexShrink: 0, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "var(--space-3)" }}>
         <div>
-          <div style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>{COPY.plan.research.recordTitle}</div>
+          {/* A heading, not a div: it is the landing point for focus and
+              the first thing a screen reader should read after descending. */}
+          <h2 ref={landingRef} tabIndex={-1} style={{ fontSize: "var(--text-sm)", fontWeight: 600, margin: 0 }}>
+            {COPY.plan.research.recordTitle}
+          </h2>
           <div className="text-dim" style={{ fontSize: "var(--text-xs)" }}>{units.length} in total</div>
         </div>
         <button className="secondary" onClick={onBack} style={{ minHeight: 36 }}>{COPY.plan.research.recordBack}</button>
@@ -93,6 +104,7 @@ export function ResearchPanel({ units, revealed, settled, dominant }: {
   dominant: boolean;
 }) {
   const [record, setRecord] = useState(false);
+  const { triggerRef, landingRef } = useDescendFocus(record);
   const [rowsRef, rowsH] = useMeasuredHeight();
 
   const shown = units.slice(0, revealed);
@@ -100,7 +112,15 @@ export function ResearchPanel({ units, revealed, settled, dominant }: {
   const visible = shown.slice(0, budget);
   const hidden = shown.length - visible.length;
 
-  if (record) return <Record units={units} onBack={() => setRecord(false)} />;
+  if (record) {
+    return (
+      <Record
+        units={units}
+        onBack={() => setRecord(false)}
+        landingRef={landingRef as React.Ref<HTMLHeadingElement>}
+      />
+    );
+  }
 
   return (
     <div className={dominant ? "cv-paper" : undefined} style={{
@@ -126,6 +146,7 @@ export function ResearchPanel({ units, revealed, settled, dominant }: {
 
       {hidden > 0 && (
         <button
+          ref={triggerRef as React.Ref<HTMLButtonElement>}
           onClick={() => setRecord(true)}
           style={{
             flexShrink: 0, alignSelf: "flex-start", marginTop: 2, padding: 0, minHeight: 0,

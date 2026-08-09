@@ -128,7 +128,7 @@ function Bubble({ m, cb, faded }: { m: ChatMessage; cb: ThreadCallbacks; faded: 
         borderRadius: user ? "var(--radius-lg)" : 0,
         fontSize: "var(--text-sm)", whiteSpace: "pre-wrap", wordBreak: "break-word",
         background: user ? "var(--panel)" : "transparent",
-        border: user ? "1px solid rgba(0,0,0,0.05)" : undefined,
+        border: user ? "1px solid var(--edge)" : undefined,
         color: "var(--text)",
       }}>
         {m.text}
