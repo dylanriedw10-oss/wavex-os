@@ -71,6 +71,34 @@
       "when": 1747500006000,
       "tag": "0012_deliverable_git",
       "breakpoints": false
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1779062401000,
+      "tag": "0002_memberships",
+      "breakpoints": false
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1779062402000,
+      "tag": "0003_corporate_inquiries",
+      "breakpoints": false
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1779062403000,
+      "tag": "0004_wizard_step",
+      "breakpoints": false
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1779062404000,
+      "tag": "0005_wizard_repo",
+      "breakpoints": false
     }
   ]
 }
