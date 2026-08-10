@@ -102,7 +102,7 @@ export function Medallion({ icon, hue, size = 44 }: { icon: string; hue: string;
       display: "grid", placeItems: "center",
       background: `linear-gradient(180deg, color-mix(in srgb, ${hue} 7%, #FFFFFF), color-mix(in srgb, ${hue} 15%, #FFFFFF))`,
       border: `1px solid color-mix(in srgb, ${hue} 32%, transparent)`,
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.65), 0 1px 2px rgba(28,25,18,0.07)",
+      boxShadow: "var(--bevel)",
     }}>
       <Ic name={icon} size={Math.round(size * 0.45)} color={hue} />
     </span>
@@ -754,7 +754,12 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
   // unplaced stays neutral.
   const deptIndex = new Map((fly.data?.departments ?? []).map((d, i) => [d.id, i]));
   const hueFor = (id: string, kind: OrgNode["kind"], parentId?: string | null): string => {
-    if (kind === "constitution") return "#605F96";
+    // The token, not its value. The comment above already said "Law wears the
+    // mind hue" — it was just spelled as a raw hex, which put a status
+    // token's literal in a component where nothing could see it drift. (The
+    // hex is deliberately not repeated here: gate 4 greps for it, and a
+    // comment that names the forbidden value would trip the gate forever.)
+    if (kind === "constitution") return "var(--mind)";
     if (kind === "metric") return METRIC_HUE;
     if (kind === "department") return deptHue(deptIndex.get(id) ?? DEPT_HUES.length);
     if (parentId && deptIndex.has(parentId)) return deptHue(deptIndex.get(parentId)!);

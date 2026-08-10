@@ -26,9 +26,21 @@ cover every surface that renders operator-facing UI. `src/wavex-os/` still
 contains the legacy dark wizard, so a few checks stay canvas-scoped where the
 legacy idiom is knowingly different — each says so.
 
+**A gate that errors is not a gate that passes.** Three of the checks below
+could not do their job and were silently reporting clean. Each had a live
+violation sitting behind it — see the notes on 1, 4 and 5. Re-read the exit
+code, not just the absence of output: `grep` exits 0 on a hit, 1 on none, and
+**2 on a broken pattern**, and only 1 means the check passed.
+
 ```bash
-# 1. No ad hoc shadows — elevation tokens only
-grep -rn 'boxShadow: "0 ' packages/onboarding-ui/src/canvas/ | grep -v '0 0 0'
+# 1. No ad hoc shadows — elevation tokens only.
+#    Was `boxShadow: "0 ` — anchored to values starting with a zero, so it
+#    could not see `boxShadow: "inset ...`, and the ONE genuine ad-hoc shadow
+#    in the tree (the Medallion bevel) was the one shape it was blind to.
+#    Now: any inline value that is not a token and not a 0-0-0 ring.
+#    Excludes any TOKEN (`var(--…)`), an explicit `"none"`, and 0-0-0 rings.
+grep -rn 'boxShadow: "' packages/onboarding-ui/src/canvas/ \
+  | grep -v 'var(--' | grep -v '"none"' | grep -v '"0 0 0'
 
 # 2. Mono is for verbatim machine output only (the deliverable <pre>)
 grep -rn 'font-mono' packages/onboarding-ui/src/canvas/*.tsx | grep -v '<pre' | grep -v 'WorkPanel.tsx'
@@ -36,18 +48,33 @@ grep -rn 'font-mono' packages/onboarding-ui/src/canvas/*.tsx | grep -v '<pre' | 
 # 3. No new font stacks
 grep -rn 'fontFamily' packages/onboarding-ui/src/canvas/*.tsx | grep -v 'var(--font-mono)'
 
-# 4. No raw hex status colors in components — tokens only
-grep -rnE '#(2\5?57A4A|96781F|8E3A38|2A737A|605F96)' packages/onboarding-ui/src/canvas/*.tsx
+# 4. No raw hex status colors in components — tokens only.
+#    The pattern used to read `#(2\5?57A4A|…)`. `\5` is not a valid escape,
+#    so grep exited 2 with "invalid escape" and printed nothing — which reads
+#    exactly like a pass. This check had therefore NEVER run, and a raw
+#    `#605F96` (that is `--mind`, verbatim) had shipped in OrgFlywheel behind
+#    it. Case-insensitive, because a lowercase hex is the same colour.
+grep -rniE '#(257A4A|96781F|8E3A38|2A737A|605F96)' packages/onboarding-ui/src/canvas/*.tsx
 
 # 5. The fit law (Rev 10): only the two named records may scroll.
 #    Widened past src/canvas/ — this is what the pricing modal evaded.
 #    Hits are CANDIDATES, not verdicts: className often sits on a different
 #    line from the style, so confirm each element carries cv-thread or
-#    cv-record before calling it a violation. -B3 makes that readable.
-grep -rn -B3 'overflowY: "auto"\|overflow: "auto"' \
+#    cv-record before calling it a violation.
+#    `grep -B3 … | grep -v cv-record` could never work: the filter is
+#    LINE-scoped, so it deletes the className line from the output and leaves
+#    the `overflow` line behind it. Both of the tree's two legal scrollers
+#    were therefore reported as violations on every run, forever — and a check
+#    that always cries wolf is a check people learn to skip.
+#    This version scopes the exemption to the BLOCK: for each hit, look back
+#    8 lines for the class, and print only if it is genuinely absent.
+grep -rn 'overflowY: "auto"\|overflow: "auto"' \
   packages/onboarding-ui/src/canvas/*.tsx packages/onboarding-ui/src/build/**/*.tsx \
   packages/onboarding-ui/src/wavex-os/pricing/*.tsx \
-  | grep -v 'cv-thread' | grep -v 'cv-record'
+| while IFS=: read -r f l _; do
+    start=$(( l > 8 ? l - 8 : 1 ))
+    sed -n "${start},${l}p" "$f" | grep -q 'cv-thread\|cv-record' || echo "$f:$l"
+  done
 
 # 6. No new hardcoded caps — rows are budgeted by fitRows(), not by a constant
 grep -rn '\.slice(0, *[0-9]' \
