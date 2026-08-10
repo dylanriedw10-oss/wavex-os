@@ -258,5 +258,32 @@ export const COPY = {
      *  then, so this describes what is on screen rather than narrating over
      *  it. Nothing here claims an agent did anything. */
     workflows: "The operating cycles are in place.",
+
+    /** THE CLOSING WORD, and what it is allowed to depend on.
+     *
+     *  The choreographer polls ignition and then said "alive" regardless —
+     *  `onStage("done")` sat outside the loop. A run whose every poll threw,
+     *  or that gave up still `not_activated`, or that came back `deferred`
+     *  (the runtime answered and said it had NOT fully started), all closed
+     *  with the same word, the same session wipe, and the same automatic
+     *  landing on the live canvas of an organization that never started.
+     *
+     *  Three outcomes, three endings. The two that are not "ignited" both
+     *  say the same true thing first — the plan is fine, the organization is
+     *  committed, this is a runtime problem — because the operator's real
+     *  question at that moment is "did I just lose all of that?" */
+    runtime: {
+      polling: "runtime igniting…",
+      alive: "alive",
+      incomplete: "runtime started, not fully",
+      incompleteBody:
+        "Your organization is approved and its work is queued. The runtime answered and reported it didn't fully start — nothing about the plan is wrong, and nothing is lost. Mission Control shows what stalled and can start it.",
+      silent: "runtime hasn't answered",
+      silentBody:
+        "Your organization is approved and its work is queued. The runtime hasn't reported in yet — that's a runtime problem, not a problem with the plan. Mission Control shows its status and can start it.",
+      /** Offered, not performed. Landing them automatically is what made the
+       *  failure indistinguishable from success. */
+      continue: "Open the canvas anyway →",
+    },
   },
 } as const;
