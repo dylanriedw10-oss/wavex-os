@@ -193,10 +193,11 @@ export function BuildPlan({ companyId, run, stage, revealed, researchSettled }: 
         </div>
       </div>
 
-      <style>{`
-        @keyframes cv-appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-        @keyframes cv-morph { 0% { opacity: .55; } 100% { opacity: 1; } }
-      `}</style>
+      {/* cv-appear and cv-morph were redeclared here because the originals sat
+          inside CanvasPage, which /build never mounts. Two copies of one
+          animation is how the vocabulary drifted: cv-breathe was never
+          duplicated, so it was simply dead on this surface. Both now come
+          from styles.css. */}
     </div>
   );
 }

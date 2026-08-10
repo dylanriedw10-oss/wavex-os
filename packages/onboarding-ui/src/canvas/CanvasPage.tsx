@@ -728,30 +728,12 @@ export default function CanvasPage() {
       </div>
       </InstrumentHeight.Provider>
 
-      <style>{`
-        /* Nothing bounces, nothing scales: arrival and departure GLIDE.
-           Emphasis is a breath of opacity, never a flash. */
-        @keyframes cv-appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-        @keyframes cv-dissolve { to { opacity: 0; transform: translateY(4px); } }
-        @keyframes cv-morph { 0% { opacity: .55; } 100% { opacity: 1; } }
-        .cv-glow {
-          position: absolute; inset: -14px; border-radius: var(--radius-lg);
-          pointer-events: none;
-          animation: cv-illuminate 45s var(--ease) forwards;
-        }
-        /* Fresh thinking still leaves a fingerprint — one whispered wash of
-           mind that fades as the thought settles. */
-        @keyframes cv-illuminate {
-          from { box-shadow: 0 0 90px -30px color-mix(in srgb, var(--mind) 22%, transparent); }
-          to   { box-shadow: 0 0 90px -30px transparent; }
-        }
-        .cv-breathe { animation: cv-breathe 2.4s ease-in-out infinite; }
-        @keyframes cv-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
-        @media (max-width: 900px) {
-          .canvas-split { grid-template-columns: 1fr !important; }
-          .canvas-split > section:first-child { border-right: none !important; border-bottom: 1px solid var(--border); max-height: 46vh; }
-        }
-      `}</style>
+      {/* The motion vocabulary and the `.canvas-split` breakpoint used to be
+          declared here, in a <style> this component rendered. /build reuses
+          both and never mounts this component, so on the onboarding route
+          they did not exist at all. They now live in styles.css, which every
+          surface loads. Nothing canvas-only was left behind — if it were, it
+          would belong here. */}
     </CanvasBoundary>
   );
 }

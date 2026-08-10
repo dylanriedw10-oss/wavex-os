@@ -276,6 +276,46 @@
 /* The Runtime tray arrives from the edge it lives on — one glide. */
 @keyframes cv-tray-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 
+/* ── The motion vocabulary. HERE, not in a component. ──────────────────────
+ *
+ * These five lived inside a `<style>` block rendered by CanvasPage. That was
+ * survivable while /canvas was the only surface using them. It stopped being
+ * survivable when /build was built beside it: BuildOrgPage reuses the same
+ * class names — `.canvas-split`, `cv-appear`, `cv-morph`, `cv-breathe` — and
+ * never mounts CanvasPage, so on the onboarding route the rules simply did
+ * not exist.
+ *
+ * What that cost, all of it confirmed in the running page at /build:
+ *   - `cv-breathe` resolved to NOTHING at five call sites (UnderstandReality,
+ *     BuildPlan twice, Review, BirthChoreographer). Those are precisely the
+ *     moments the system is waiting on a model and the pulse is the only
+ *     signal that anything is happening. The interface went still exactly
+ *     where it most needed to say "still working".
+ *   - `cv-appear`/`cv-morph` existed only while BuildPlan was mounted, because
+ *     BuildPlan shipped its own private copy. So the same animation was
+ *     defined twice, in two files, and absent everywhere else.
+ *
+ * A shared vocabulary cannot live inside one of its speakers. The duplicate in
+ * BuildPlan.tsx is deleted with this. */
+@keyframes cv-appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes cv-dissolve { to { opacity: 0; transform: translateY(4px); } }
+@keyframes cv-morph { 0% { opacity: .55; } 100% { opacity: 1; } }
+.cv-breathe { animation: cv-breathe 2.4s ease-in-out infinite; }
+@keyframes cv-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+.cv-glow {
+  position: absolute;
+  inset: -14px;
+  border-radius: var(--radius-lg);
+  pointer-events: none;
+  animation: cv-illuminate 45s var(--ease) forwards;
+}
+/* Fresh thinking still leaves a fingerprint — one whispered wash of mind
+ * that fades as the thought settles. */
+@keyframes cv-illuminate {
+  from { box-shadow: 0 0 90px -30px color-mix(in srgb, var(--mind) 22%, transparent); }
+  to   { box-shadow: 0 0 90px -30px transparent; }
+}
+
 /* Hover lifts 2px — the constitution's tactile confirmation. Interactive
  * objects only; surfaces at rest never move. */
 .canvas-root .cv-lift {
@@ -374,6 +414,23 @@
 @media (max-width: 900px) {
   .card { padding: var(--space-4); }
   .nav-buttons { flex-direction: column; gap: var(--space-2); }
+
+  /* The split stacks. Also moved out of CanvasPage's local <style> — and
+   * this one had teeth, because `.canvas-split` is the onboarding's ENTIRE
+   * layout. Its inline grid is `minmax(320px, 35%) 1fr`, so the 320px floor
+   * wins on a phone and the workspace gets whatever is left: at a 375px
+   * viewport the computed columns were `320px 55px`. The canvas — the half
+   * of the product that shows the organization assembling itself — was a
+   * 55-pixel strip, on the surface a new customer lands on first.
+   *
+   * Nothing overflowed, so the "no horizontal scroll" check passed the whole
+   * time. Fitting is not the same as working. */
+  .canvas-split { grid-template-columns: 1fr !important; }
+  .canvas-split > section:first-child {
+    border-right: none !important;
+    border-bottom: 1px solid var(--border);
+    max-height: 46vh;
+  }
 }
 
 * { box-sizing: border-box; }
