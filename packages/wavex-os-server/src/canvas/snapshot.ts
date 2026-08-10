@@ -38,7 +38,11 @@ export const HEADLINES: Partial<Record<CatalogKey, Extract>> = {
   // The row still renders in the KPI table (labelled); it just cannot be the
   // big number a delta is measured from.
   "kpis": (j) => (j?.kpis?.[0]?.provenance === "measured" ? num(j?.kpis?.[0]?.currentValue) : null),
-  "ignition": (j) => num(j?.agentsWorking),
+  // `agentsWorking` is nullable at the source (routes/ignition.ts) — the
+  // native ignition variant never counts agents. `num()` of a null must stay
+  // null so the delta arithmetic has nothing to measure from, rather than
+  // silently treating "not counted" as a reading of zero.
+  "ignition": (j) => (j?.agentsWorking == null ? null : num(j.agentsWorking)),
   "redundancy": (j) => (Array.isArray(j?.all_slots) ? j.all_slots.filter((s: any) => !s.muted).length : null),
   "runtime-dashboard": (j) => num(j?.dashboard?.agents?.running),
   "runtime-live-runs": (j) => (Array.isArray(j?.runs) ? j.runs.length : null),

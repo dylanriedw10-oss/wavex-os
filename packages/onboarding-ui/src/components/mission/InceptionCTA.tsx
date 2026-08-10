@@ -22,6 +22,10 @@ interface HandoffState {
   handedOff: boolean;
   agentsTotal: number;
   agentsReady: number;
+  /** Did the agents read succeed? Its failure was swallowed, so an errored
+   *  request and a genuinely empty fleet both arrived as `agentsTotal: 0`
+   *  and rendered the same confident sentence about what happens next. */
+  agentsRead: boolean;
 }
 
 /** Paperclip is vendored at packages/core/ and runs on port 3100 by
@@ -67,6 +71,7 @@ export function InceptionCTA() {
       // Either failing is OK; the CTA degrades gracefully.
       let agentsTotal = 0;
       let agentsReady = 0;
+      let agentsRead = false;
       let paperclipUrl: string | null = null;
       let paperclipCompanyId: string | null = null;
       try {
@@ -75,6 +80,7 @@ export function InceptionCTA() {
           const arr = (await r.json()) as Array<{ status: string }>;
           agentsTotal = arr.length;
           agentsReady = arr.filter((a) => a.status === "ready" || a.status === "active" || a.status === "idle").length;
+          agentsRead = true;
         }
       } catch { /* mock-core may not expose this — ignore */ }
       try {
@@ -94,6 +100,7 @@ export function InceptionCTA() {
         handedOff: Boolean(paperclipUrl && paperclipCompanyId),
         agentsTotal,
         agentsReady,
+        agentsRead,
       });
       // Only probe localhost when we DON'T already have a configured
       // handoff URL — otherwise we'd waste the round-trip.
@@ -152,8 +159,16 @@ export function InceptionCTA() {
         method: "POST",
       });
       if (r.ok) {
-        const j = (await r.json()) as { ok: boolean; triggered?: number };
-        setForceResult(`Triggered ${j.triggered ?? 0} heartbeats — refresh the fleet panel below to see new activity.`);
+        // `source` is how the server says whether anything really fired.
+        // "mock-recorded" means it appended an audit line and nothing woke
+        // up, and this used to promise "new activity" either way.
+        const j = (await r.json()) as { ok: boolean; triggered?: number; source?: string };
+        const n = j.triggered ?? 0;
+        setForceResult(
+          j.source === "mock-recorded"
+            ? `Recorded a trigger for ${n} agent${n === 1 ? "" : "s"}. Nothing was actually woken — this instance has no live runtime behind the endpoint.`
+            : `Triggered ${n} heartbeat${n === 1 ? "" : "s"} — the fleet panel below updates on its next poll.`,
+        );
       } else {
         setForceResult(`Trigger endpoint returned HTTP ${r.status}. Fleet still runs on its normal cadence.`);
       }
@@ -194,12 +209,22 @@ export function InceptionCTA() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 11, color: "var(--accent)", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 4 }}>
-            Inception · your fleet is live
+            {/* WAS "Inception · your fleet is live". This card reads DB agent
+                rows and a handoff mapping; neither of those is a statement
+                that anything is RUNNING, and the IgnitionBanner directly
+                above now answers that from persisted ignition state. Two
+                surfaces claiming the same thing from different evidence is
+                how the page came to contradict itself. */}
+            Inception · your organization
           </div>
           <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-            {state.agentsReady > 0
-              ? `${state.agentsReady} of ${state.agentsTotal} agents ready · first cycle starts on the next heartbeat tick`
-              : "Your fleet is spawning · agents will start their first cycles within minutes"}
+            {!state.agentsRead
+              ? "Couldn’t read the fleet roster — the status above is the reliable one."
+              : state.agentsTotal === 0
+                ? "No agents on record yet for this company."
+                : state.agentsReady > 0
+                  ? `${state.agentsReady} of ${state.agentsTotal} agents ready`
+                  : `${state.agentsTotal} agents on record, none ready yet`}
           </div>
           <div className="text-dim" style={{ fontSize: 12, lineHeight: 1.55 }}>
             {state.handedOff

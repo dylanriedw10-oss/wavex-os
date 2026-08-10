@@ -42,8 +42,25 @@ export type IgnitionStatus = "not_activated" | "deferred" | "partial" | "ignited
 export interface IgnitionStatusResponse {
   ok: true;
   status: IgnitionStatus;
-  agentsWorking: number;
+  /** How many agents this run actually put to work — or NULL when the run
+   *  that wrote the file did not record such a thing.
+   *
+   *  Nullable because it genuinely is. Two ignition variants write this file
+   *  and only one of them touches agents: `bridge/ignition.ts` stamps a
+   *  heartbeat offset per non-muted agent, so its count is real, while
+   *  `bridge/ignition-native.ts` seeds a goal and tasks and never looks at
+   *  the fleet. This field previously served the SEEDED TASK COUNT under an
+   *  agent's name on both paths — a 35-agent company read "7 agents working"
+   *  because seven tasks had been created. */
+  agentsWorking: number | null;
+  /** Pieces of work queued: issues + roadmap items on the Paperclip path,
+   *  bootstrap tasks on the native one. Both are genuinely counts of work. */
   workflowsQueued: number;
+  /** The coverage gaps the run recorded. Was previously inferred from
+   *  `warnings.length`, which is a different thing entirely — a healthy
+   *  idempotent re-activate pushes the warning "work store already seeded"
+   *  and was therefore rendered as "1 gaps". */
+  gaps: string[];
   goalId: string | null;
   paperclipUrl: string | null;
   paperclipCompanyId: string | null;
@@ -99,14 +116,37 @@ export function registerIgnitionRoutes(app: FastifyInstance): void {
     // goal_create/seed_issues; a state file written by the native seeding
     // variant carries seed_goal/seed_tasks. Read both through one loose
     // accessor so either shape answers, and neither 500s the read.
-    const anySteps = state?.steps as Record<string, { created?: string[]; goal_id?: string } | undefined> | undefined;
-    const seeded = anySteps?.seed_tasks?.created?.length
-      ?? anySteps?.seed_issues?.created?.length ?? 0;
+    const anySteps = state?.steps as Record<string, {
+      created?: string[]; goal_id?: string; gaps?: string[]; offsets?: Record<string, number>;
+    } | undefined> | undefined;
+
+    // Each number derived from the thing it is named after, and only when
+    // that thing is on disk.
+    //
+    // AGENTS. `stagger_heartbeats.offsets` carries one entry per non-muted
+    // agent (bridge/ignition.ts stamps `offsets[agent.slot]` for each), so
+    // subtracting the coverage gaps reproduces exactly what the POST path
+    // computes as `nonMuted.length - gaps.length`. The native variant never
+    // writes that step, so it has no agent count and gets `null` — the
+    // difference between "zero agents are working" and "this run never
+    // looked" is the whole point of the field being nullable.
+    const gaps = anySteps?.validate_coverage?.gaps ?? [];
+    const offsets = anySteps?.stagger_heartbeats?.offsets;
+    const agentsWorking = offsets ? Math.max(0, Object.keys(offsets).length - gaps.length) : null;
+
+    // WORK. Two vocabularies for the same fact: the Paperclip path creates
+    // issues and roadmap items, the native path creates bootstrap tasks.
+    const queued =
+      (anySteps?.seed_tasks?.created?.length ?? 0) +
+      (anySteps?.seed_issues?.created?.length ?? 0) +
+      (anySteps?.seed_roadmap?.created?.length ?? 0);
+
     const body: IgnitionStatusResponse = {
       ok: true,
       status: deriveStatus(state),
-      agentsWorking: seeded,
-      workflowsQueued: seeded,
+      agentsWorking,
+      workflowsQueued: queued,
+      gaps,
       goalId: anySteps?.seed_goal?.goal_id ?? anySteps?.goal_create?.goal_id ?? null,
       paperclipUrl: handoff?.paperclipUrl ?? null,
       paperclipCompanyId: handoff?.paperclipCompanyId ?? null,

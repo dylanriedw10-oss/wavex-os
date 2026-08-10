@@ -122,8 +122,15 @@ export interface CanvasPostResponse {
 export interface IgnitionStatusResponse {
   ok: boolean;
   status: "not_activated" | "deferred" | "partial" | "ignited";
-  agentsWorking: number;
+  /** NULL when the run that wrote ignition-state.json never recorded an
+   *  agent count — the native seeding variant seeds a goal and tasks and
+   *  never touches the fleet. "Zero agents working" and "nobody counted" are
+   *  different facts and this field now distinguishes them; every consumer
+   *  must too. */
+  agentsWorking: number | null;
   workflowsQueued: number;
+  /** Real coverage gaps from `validate_coverage`, not `warnings.length`. */
+  gaps: string[];
   goalId: string | null;
   paperclipUrl: string | null;
   paperclipCompanyId: string | null;

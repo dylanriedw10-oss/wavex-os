@@ -14,6 +14,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import { useQuery } from "@tanstack/react-query";
 import { wavexOsOnboardingApi, ApiError } from "../wavex-os/lib/api";
 import { EMPTY_STATUSES, type CatalogKey, type CellSpec, type CanvasProposal, type SinceSnapshot } from "./contract";
+import { ignitionLine, type IgnitionFacts } from "../lib/ignition-copy";
 
 /* ---- shared formatters (third duplication of TokenCounter/BudgetChip avoided) ---- */
 export function formatTokens(n: number): string {
@@ -410,7 +411,13 @@ function readMetric(api: CatalogKey, d: any): MetricReading | null {
         sub: k?.label != null ? `${k.label}${prov}` : "no KPI", fmt: String };
     }
     case "ignition":
-      return { value: d.agentsWorking ?? null, display: String(d.agentsWorking ?? 0), sub: `agents working · ${d.status}`, fmt: String };
+      // `?? 0` turned "this run never counted agents" into the number zero,
+      // which reads as "your fleet is idle". A metric with no measurement
+      // shows the em dash every other unmeasured cell here shows, and the
+      // sub-label names what IS known instead.
+      return d.agentsWorking != null
+        ? { value: d.agentsWorking, display: String(d.agentsWorking), sub: `agents working · ${d.status}`, fmt: String }
+        : { value: null, display: "—", sub: `${d.workflowsQueued} queued · ${d.status}`, fmt: String };
     case "obs-budget": {
       const w = d.data?.windows;
       return { value: w?.last24h?.burnCents ?? null, display: w ? `$${(w.last24h.burnCents / 100).toFixed(2)}` : "—", sub: "burn, last 24h", fmt: (n) => `$${(n / 100).toFixed(2)}` };
@@ -857,24 +864,21 @@ function ComparisonCell({ cell, companyId, onDrill, since }: CellProps) {
   return <Shell cell={cell} state={state} onDrill={onDrill}>{body}</Shell>;
 }
 
-const IGNITION_COPY: Record<string, { tone: string; label: (d: any) => string }> = {
-  not_activated: { tone: "var(--text-dim)", label: () => "Not activated yet — finish onboarding to build a fleet." },
-  deferred: { tone: "var(--warning)", label: () => "Fleet activated but not ignited — agents are idle." },
-  partial: { tone: "var(--warning)", label: (d) => `Fleet ignited (partial) — ${d.agentsWorking} working, ${d.warnings.length} gaps.` },
-  ignited: { tone: "var(--success)", label: (d) => `Fleet ignited — ${d.agentsWorking} agents working, ${d.workflowsQueued} queued.` },
-};
+/* The table moved to lib/ignition-copy.ts so Mission Control's banner reads
+   the same sentences from the same place — see that file for why both of the
+   old lines were counting something other than what they named. */
 
 function AttentionCell({ cell, companyId, onDrill }: CellProps) {
   const ign = useBinding("ignition", companyId);
   const budget = useBinding("token-budget", companyId);
   const items: Array<{ tone: string; text: string; prompt: string }> = [];
   if (ign.kind === "data") {
-    const c = IGNITION_COPY[ign.data.status];
-    if (c && ign.data.status !== "ignited") {
-      items.push({ tone: c.tone, text: c.label(ign.data), prompt: "ignite the fleet" });
-    } else if (c) {
-      items.push({ tone: c.tone, text: c.label(ign.data), prompt: "show fleet state" });
-    }
+    const line = ignitionLine(ign.data as IgnitionFacts);
+    items.push({
+      tone: line.tone,
+      text: line.detail ? `${line.headline} ${line.detail}` : line.headline,
+      prompt: line.actionable ? "ignite the fleet" : "show fleet state",
+    });
   }
   if (budget.kind === "data") {
     const cap = budget.data.budget.cap_tokens as number | null;

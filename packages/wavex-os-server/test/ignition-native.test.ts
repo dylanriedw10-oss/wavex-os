@@ -171,7 +171,7 @@ describe("igniteNative()", () => {
 });
 
 describe("GET /api/instance/:companyId/ignition after native ignition", () => {
-  it("decodes seed_goal/seed_tasks into goalId + agentsWorking", async () => {
+  it("decodes seed_goal/seed_tasks into goalId + queued work, and reports NO agent count", async () => {
     writeManifest();
     const { igniteNative } = await import("../src/bridge/ignition-native.js");
     const ignited = await igniteNative(CO);
@@ -186,7 +186,15 @@ describe("GET /api/instance/:companyId/ignition after native ignition", () => {
       const body = r.json();
       expect(body.status).toBe("ignited");
       expect(body.goalId).toBe(ignited.goal_id);
-      expect(body.agentsWorking).toBe(2);
+      // The two seeded TASKS are queued work, and that is all this path
+      // knows. It never touches the fleet — no `stagger_heartbeats` step is
+      // written — so there is no agent count to report.
+      expect(body.workflowsQueued).toBe(2);
+      // WAS `expect(body.agentsWorking).toBe(2)`, which pinned the defect:
+      // the route was serving the task count under an agent's name, so a
+      // 35-agent company read "2 agents working". Null is the honest answer
+      // and is distinguishable from a measured zero.
+      expect(body.agentsWorking).toBeNull();
     } finally {
       await app.close();
     }

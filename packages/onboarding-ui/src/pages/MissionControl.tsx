@@ -10,6 +10,7 @@ import { PrivacyPanel } from "../components/PrivacyPanel";
 import { AllocationSlider } from "../components/AllocationSlider";
 import { OnboardingChecklist } from "../components/mission/OnboardingChecklist";
 import { WizardMetricsPanel } from "../components/mission/WizardMetricsPanel";
+import { IgnitionBanner } from "../components/mission/IgnitionBanner";
 import { useCompany } from "../wavex-os/lib/CompanyContext";
 import { getSupabase } from "../lib/supabase";
 import { CoachmarkOverlay, type CoachmarkStep } from "../wavex-os/components/Coachmark";
@@ -166,10 +167,18 @@ export default function MissionControl() {
         <div style={{ display: "flex", gap: "2rem", alignItems: "flex-start" }}>
           {/* ── main content column ── */}
           <div style={{ flex: 1, minWidth: 0 }}>
-            {/* Inception CTA — when a company is selected, surface the "your
-                fleet is live, here's what to do next" card BEFORE the KPIs so
-                the customer has an obvious path forward. The legacy mission
-                control was a dead-end after activate. */}
+            {/* THE ANSWER FIRST. Everything below this line — the CTA, the
+                KPIs, the fleet — is read differently depending on whether
+                the runtime actually started, and until now nothing on this
+                page said. The banner is a read of persisted ignition state
+                (it survives a refresh, which is the whole point of the
+                endpoint behind it) and carries the only in-app control that
+                can retry a failed ignition. */}
+            <IgnitionBanner companyId={companyId} />
+
+            {/* Inception CTA — the "here's what to do next" card. It sits
+                BELOW the banner deliberately: it is guidance, and guidance
+                that contradicts the status above it is worse than none. */}
             {companyId && <InceptionCTA />}
 
             <div data-tour="mc-kpis" style={{ marginBottom: "2.5rem" }}>
