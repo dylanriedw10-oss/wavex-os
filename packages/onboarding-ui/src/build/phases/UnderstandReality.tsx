@@ -51,12 +51,50 @@ export function UnderstandReality({ companyId, loading, condensed, onCondensed }
     );
   }
 
+  // THE DISTINCTION THIS PHASE TURNS ON.
+  //
+  // `summarize(q.data?.connectors ?? [])` gives a summary for THREE different
+  // situations: the vault answered and there is nothing; the vault has not
+  // answered yet; the vault request failed. All three produce
+  // `requiredTotal === 0`, and that value was the sole condition for offering
+  // "Nothing required — continue →" — a button whose single click sets the
+  // sticky `connectorsCondensed` bit and moves the flow on to plan assembly.
+  //
+  // So a slow first fetch, or a 403 from the credentials endpoint, presented
+  // itself as a finding about the operator's plan and handed them an
+  // irreversible control to act on it. The plan would then be assembled with
+  // no connectors, and the indicator afterwards would read
+  // "Connectors · complete — 0 wired", which is a sentence about a question
+  // nobody ever answered.
+  //
+  // `isSuccess` is the only state in which a claim about connectors is a
+  // claim about connectors.
+  const answered = q.isSuccess;
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "var(--space-4)" }}>
-      {loading ? (
+      {loading || (!answered && !q.isError) ? (
         <span className="text-dim cv-breathe" style={{ fontSize: "var(--text-sm)" }}>
-          reading what already exists around the company…
+          {COPY.connectors.reading}
         </span>
+      ) : q.isError ? (
+        // A failed read is a fact about the READ, and it says out loud that
+        // nothing was skipped — because the alternative reading of a dead end
+        // here is "the flow silently dropped my connectors". No continue
+        // button: this branch knows nothing about what the plan requires, so
+        // it has no standing to offer a skip.
+        <div role="alert" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-2)", maxWidth: "44ch", textAlign: "center" }}>
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--warning)" }}>
+            {COPY.connectors.unreadable}
+          </span>
+          <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>
+            {COPY.connectors.unreadableTail}
+          </span>
+          <button className="secondary" onClick={() => void q.refetch()}
+            style={{ fontSize: "var(--text-xs)", padding: "5px 14px", minHeight: 32 }}>
+            {COPY.connectors.retry}
+          </button>
+        </div>
       ) : (
         <>
           <ConnectorConstellation
@@ -68,12 +106,12 @@ export function UnderstandReality({ companyId, loading, condensed, onCondensed }
           {summary.requiredTotal === 0 && (
             <button className="secondary" onClick={() => { setCondensing(true); window.setTimeout(() => onCondensed(), REDUCE ? 0 : 460); }}
               style={{ fontSize: "var(--text-xs)", padding: "5px 14px", minHeight: 32 }}>
-              Nothing required — continue →
+              {COPY.connectors.skip}
             </button>
           )}
           {summary.requiredTotal > 0 && (
             <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>
-              {summary.requiredResolved} of {summary.requiredTotal} required wired — click a marker to wire it
+              {COPY.connectors.progress(summary.requiredResolved, summary.requiredTotal)}
             </span>
           )}
         </>

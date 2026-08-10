@@ -13,6 +13,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { wavexOsOnboardingApi } from "../../wavex-os/lib/api";
 import { Ic } from "../../canvas/icons";
+import { COPY } from "../copy";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -30,6 +31,15 @@ export function useConnectorCredentials(companyId: string | null, active: boolea
     queryKey: ["concierge", companyId],
     queryFn: () => wavexOsOnboardingApi.listCredentials(companyId!),
     refetchInterval: active ? 4_000 : false,
+    // Bounded, because this query gates a DECISION. React Query's default is
+    // three retries with exponential backoff, so a hard failure takes ~7s to
+    // reach `isError` — seven seconds in which the operator watches a spinner
+    // at the one point in the flow where they are being asked to act. The
+    // spinner is not lying (a read really is being attempted), it is just
+    // withholding. And the retries buy nothing here: `refetchInterval` is
+    // already retrying every 4s, forever, so the error state is never a dead
+    // end — it is a status that corrects itself the moment the vault answers.
+    retry: 1,
   });
 }
 
@@ -132,15 +142,21 @@ export function ConnectorConstellation({ companyId, companyTitle, onOpenDrawer, 
         })}
       </div>
       {/* Operational truths render even when empty; the deferred tail is a
-          counted footnote — accumulated, silent at zero. */}
-      {markers.length === 0 && !q.isLoading && (
+          counted footnote — accumulated, silent at zero.
+          `isSuccess`, not `!isLoading`. The two differ on exactly the case
+          that matters: a FAILED credentials read is not loading either, so
+          the old condition published "this plan reads no external systems"
+          on the strength of a request that came back an error. An empty
+          state is a claim about the data, and it is only sayable once there
+          is data. */}
+      {markers.length === 0 && q.isSuccess && (
         <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>
-          Nothing to wire — this plan reads no external systems yet.
+          {COPY.connectors.empty}
         </span>
       )}
       {deferredCount > 0 && (
         <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>
-          {deferredCount} deferred — not needed for this plan
+          {COPY.connectors.deferredNote(deferredCount)}
         </span>
       )}
     </div>

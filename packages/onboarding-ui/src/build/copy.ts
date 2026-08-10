@@ -128,6 +128,25 @@ export const COPY = {
     condensed: (wired: number, deferred: number) =>
       `Connectors · complete — ${wired} wired${deferred > 0 ? ` · ${deferred} deferred` : ""}`,
     manage: "Manage connections",
+
+    /** The three states of the vault read, said as three different things.
+     *
+     *  These were two hardcoded strings inside the components, which is
+     *  already against this file's charter, but the real cost was that the
+     *  code had no way to SAY the third state. "The vault has not answered"
+     *  and "the vault answered zero" both arrived as an empty array, so the
+     *  surface printed `empty` — a claim about the plan — whenever the
+     *  request was merely in flight or had failed outright. And `empty` is
+     *  what unlocks `skip`, which sets an irreversible bit. */
+    reading: "Reading what this plan needs to connect to…",
+    unreadable: "I couldn't read which systems this plan needs.",
+    unreadableTail: "Nothing has been skipped and nothing is lost — try again, or wire them later from Mission Control.",
+    retry: "Try again",
+    empty: "Nothing to wire — this plan reads no external systems yet.",
+    skip: "Nothing required — continue →",
+    progress: (resolved: number, total: number) =>
+      `${resolved} of ${total} required wired — click a marker to wire it`,
+    deferredNote: (n: number) => `${n} deferred — not needed for this plan`,
   },
 
   plan: {
