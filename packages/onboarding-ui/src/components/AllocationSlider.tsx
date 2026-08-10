@@ -44,8 +44,24 @@ export function AllocationSlider({ variant = "console" }: Props) {
       try {
         const r = await fetch("/api/inference-allocation");
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const a = (await r.json()) as Allocation;
-        if (!cancelled) setSwarmPct(a.swarm_pct);
+        // A 200 is not the same as a usable answer. This took `a.swarm_pct`
+        // on trust, so a well-formed response that simply lacked the field
+        // set state to `undefined` — which slipped past the `=== null`
+        // loading guard below and rendered `Swarm: %` and
+        // `Pool A onboarding: NaN%`. A percentage the system never sent is
+        // exactly the number this interface must never draw.
+        //
+        // Validated rather than defaulted: an unusable payload takes the
+        // SAME path as a failed request, so the operator is told the saved
+        // value could not be read instead of being shown a fabricated one
+        // silently. Clamped too, so an out-of-range number cannot produce a
+        // negative counterpart.
+        const a = (await r.json()) as Partial<Allocation> | null;
+        const pct = a?.swarm_pct;
+        if (typeof pct !== "number" || !Number.isFinite(pct)) {
+          throw new Error("response carried no swarm_pct");
+        }
+        if (!cancelled) setSwarmPct(Math.min(100, Math.max(0, Math.round(pct))));
       } catch (e) {
         if (!cancelled) {
           // Degrade gracefully — show the default so the slider still works.
