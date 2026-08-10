@@ -90,51 +90,32 @@ async function assertFits(page: Page, label: string) {
   expect(report.clippedPx, `${label}: content is clipped, not clamped — a silent cap`).toBeLessThanOrEqual(1);
 }
 
-/** Every element matching `pattern` must be rendered with a real box.
+/** Every element matching `pattern` must be VISIBLE TO THE OPERATOR — present
+ *  in the DOM is not enough, because a header rendered inside a clipped
+ *  region is present and unreadable, which is the silent cap the fit law
+ *  forbids more strongly than it forbids scrolling.
  *
- *  ONE `evaluate`, deliberately. This was written as
+ *  Two distinct things this checks that the original did not.
+ *
+ *  ONE `evaluate`, deliberately. It was written as
  *
  *      for (let i = 0; i < await groups.count(); i++)
  *        await expect(groups.nth(i)).toBeVisible();
  *
  *  which reads the count in one round trip and each element in another, while
  *  the panel re-renders on the work-store poll in between — the loop's own
- *  comment names that poll. So `nth(2)` could resolve against a list that had
- *  since shrunk and fail with "element(s) not found" under an assertion
- *  message that said "a department header is clipped". Two different faults
- *  wearing one label, and the flaky one fired in full-suite runs while the
- *  spec passed in isolation.
+ *  comment named that poll. `nth(2)` could resolve against a list that had
+ *  since shrunk and fail with "element(s) not found" under a message claiming
+ *  a clip: two faults wearing one label, the flaky one firing only in
+ *  full-suite runs. One layout snapshot removes the window entirely.
  *
- *  Taking one layout snapshot removes the window entirely.
+ *  CONTAINMENT, which `toBeVisible()` never tests — Playwright counts an
+ *  element scrolled out of an `overflow: hidden` box as visible, so the Work
+ *  ladder clipped its last department headers for as long as this gate has
+ *  existed and the gate reported success. That is the assertion below.
  *
- *  ── A REAL DEFECT THIS DOES NOT ASSERT, ON PURPOSE ───────────────────────
- *
- *  While fixing the race I extended this to also require CONTAINMENT inside
- *  the nearest clipping ancestor — the thing `toBeVisible()` never tests,
- *  since Playwright counts an element scrolled out of an `overflow: hidden`
- *  box as visible. That version fails at all three sizes, and it is right to:
- *  the Work ladder genuinely clips its last department headers. Measured in
- *  the running app:
- *
- *    1440x900  panel client 300 / scroll 654 — content [73+112+151+151+151]
- *    1024x700  panel client 200, five headers alone need 170 and `canOpen`
- *              is floored at 1, so one group must open — 233 into 200
- *
- *  The causes are stacked: `REGION_LABEL_PX` says 64 where the label renders
- *  at 29; the budget never reserves the panel's own padding and border; the
- *  panel has no flex sizing so it grows with its content instead of being
- *  bounded by its box; `LADDER_ROW_PX` (40) is the height of a row, not of an
- *  open group (63 with its "+N more"); and before the ResizeObserver reports,
- *  `rowsBudget === 0` opens EVERY group with `availPx: 0`, which ClampedList
- *  reads as no limit.
- *
- *  I attempted that fix and backed it out: every correction moved the clip
- *  rather than removing it, and the version that satisfied all three
- *  viewports broke two work.spec tests that depend on the ladder opening.
- *  Making this provably fit needs a MEASURED row height rather than another
- *  constant, which is its own piece of work. Asserting it here would leave
- *  three permanently-red tests; asserting only what is true keeps the gate
- *  meaningful, and these numbers are the brief for whoever picks it up. */
+ *  Failures carry the MEASUREMENTS. A bare "is clipped" cost three separate
+ *  probe scripts to reproduce; the numbers that decide it are right here. */
 async function assertAllVisible(page: Page, pattern: string, label: string) {
   const bad = await page.evaluate((src) => {
     const re = new RegExp(src);
@@ -145,11 +126,28 @@ async function assertAllVisible(page: Page, pattern: string, label: string) {
       const r = el.getBoundingClientRect();
       const name = text.slice(0, 40);
       if (r.width === 0 || r.height === 0) { out.push(`${name} — zero size`); continue; }
-      if (getComputedStyle(el).visibility === "hidden") out.push(`${name} — visibility:hidden`);
+      if (getComputedStyle(el).visibility === "hidden") { out.push(`${name} — visibility:hidden`); continue; }
+      let p = el.parentElement;
+      while (p) {
+        const cs = getComputedStyle(p);
+        if (cs.overflow !== "visible" || cs.overflowY !== "visible" || cs.overflowX !== "visible") {
+          const c = p.getBoundingClientRect();
+          // 1px of slack for sub-pixel layout, the tolerance assertFits uses.
+          if (r.bottom > c.bottom + 1 || r.top < c.top - 1) {
+            const sibs = [...(p.children as unknown as Element[])].map((n) => Math.round(n.getBoundingClientRect().height));
+            out.push(
+              `${name} — clipped: box ${Math.round(c.height)}px (client ${p.clientHeight}, scroll ${p.scrollHeight}), ` +
+              `content ${sibs.reduce((a, b) => a + b, 0)}px [${sibs.join("+")}], overflow ${Math.round(r.bottom - c.bottom)}px`,
+            );
+          }
+          break;
+        }
+        p = p.parentElement;
+      }
     }
     return out;
   }, pattern);
-  expect(bad, `${label}: a department header did not render`).toEqual([]);
+  expect(bad, `${label}: a department header is clipped or unrendered`).toEqual([]);
 }
 
 test.describe("the fit law — every view fits the window", () => {
@@ -240,7 +238,10 @@ test.describe("the fit law — every view fits the window", () => {
       box.id = "render-probe";
       // Present in the DOM, zero box — exactly what a header collapsed by a
       // starved budget looks like.
-      box.innerHTML = `<button style="visibility:hidden">PROBE 9/9 unseen</button>`;
+      box.style.cssText = "height:20px;overflow:hidden;position:fixed;top:0;left:0;width:300px";
+      // Pushed below a 20px window: present in the DOM, unreadable — exactly
+      // what a header looks like when a starved budget overruns its panel.
+      box.innerHTML = `<div style="height:200px"></div><button>PROBE 9/9 unseen</button>`;
       document.body.appendChild(box);
     });
 
@@ -248,8 +249,12 @@ test.describe("the fit law — every view fits the window", () => {
     try {
       await assertAllVisible(page, "PROBE \\d+/\\d+ unseen", "self-test");
     } catch (e) { caught = e; }
-    expect(caught, "assertAllVisible must report an unrenderable header").not.toBeNull();
+    expect(caught, "assertAllVisible must report an unreadable header").not.toBeNull();
     expect(String(caught)).toContain("PROBE 9/9 unseen");
+    // The containment branch specifically — the one that catches the real
+    // ladder defect — and the measurements that make it diagnosable.
+    expect(String(caught)).toContain("clipped: box");
+    expect(String(caught)).toMatch(/overflow \d+px/);
 
     // And it must pass again once the probe is gone — otherwise it is simply
     // always failing, which is the opposite vacuity.

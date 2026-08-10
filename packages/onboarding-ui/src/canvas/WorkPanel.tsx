@@ -7,7 +7,7 @@
  *  say what's missing; deliverable output renders verbatim, never edited;
  *  status color never travels without its printed status word. */
 
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { wavexOsOnboardingApi, ApiError } from "../wavex-os/lib/api";
@@ -148,6 +148,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
   // each measures its OWN share. Self-correcting — no guessed chrome math.
   const [queueRef, queueH] = useMeasuredHeight();
   const [ladderRef, ladderH] = useMeasuredHeight();
+
   const [busy, setBusy] = useState<"seed" | "cycle" | null>(null);
   const workQ = useQuery({
     queryKey: ["org-work", companyId],
@@ -157,6 +158,64 @@ export function WorkPanel({ companyId }: { companyId: string }) {
     // one runs so the ladder tells the mid-flight truth (live dots, not
     // a frozen pre-cycle snapshot).
     refetchInterval: busy === "cycle" ? 2_000 : 30_000,
+  });
+
+  /** THE LADDER'S FIT, SETTLED BY MEASUREMENT INSTEAD OF BY CONSTANTS.
+   *
+   *  The budget below predicts how much room the groups will need from
+   *  `REGION_LABEL_PX`, `GROUP_HEADER_PX` and `LADDER_ROW_PX`. Every one of
+   *  those had drifted from what the browser actually lays out — the region
+   *  label renders at 29px against a reserved 64; the panel's own padding and
+   *  border were never reserved at all; and `LADDER_ROW_PX` (40) is the
+   *  height of a ROW, not of an open group, which costs 63 once the clamp
+   *  adds its "+N more". Five departments therefore laid out 654px of content
+   *  into a 300px panel and the last headers were cut off: present in the
+   *  DOM, unreachable, the silent cap Rev 10 forbids more strongly than it
+   *  forbids scrolling.
+   *
+   *  I tried correcting the constants. Each correction moved the clip rather
+   *  than removing it, because a constant cannot know how tall a wrapped
+   *  title or a clamp's descend button will be. So the prediction stays as
+   *  the opening guess and the BROWSER settles it: render, measure, and if
+   *  the content exceeds the box, close one more group and measure again.
+   *
+   *  ── WHY THIS CANNOT OSCILLATE ────────────────────────────────────────
+   *
+   *  The comment on the ladder container below warns about exactly this
+   *  failure mode: "fold shrinks the content, which grows the allocation,
+   *  which unfolds it, forever." That loop exists only when a box is sized by
+   *  its content. The panel is `flex: 1 1 0` with `minHeight: 0`, so its
+   *  height is the leftover space and NOTHING it contains can change it —
+   *  `clientHeight` is fixed while `scrollHeight` only falls as groups close.
+   *  The descent is therefore monotonic and bounded by the group count.
+   *
+   *  It also runs in `useLayoutEffect`, so the whole descent completes before
+   *  the browser paints: the operator never sees the intermediate states. */
+  const ladderPanelRef = useRef<HTMLDivElement | null>(null);
+  const [openCap, setOpenCap] = useState(Number.POSITIVE_INFINITY);
+  const [foldToLine, setFoldToLine] = useState(false);
+  const taskCount = workQ.data?.tasks?.length ?? 0;
+
+  // A new epoch: the space or the content changed, so last epoch's verdict is
+  // stale. Without this a window that GROWS keeps the groups a smaller one
+  // closed — the descent is one-way by design, so something must reopen it.
+  useLayoutEffect(() => {
+    setOpenCap(Number.POSITIVE_INFINITY);
+    setFoldToLine(false);
+  }, [ladderH, taskCount]);
+
+  useLayoutEffect(() => {
+    const el = ladderPanelRef.current;
+    // Nothing to decide before the container has been measured; the reset
+    // above re-runs this the moment it has.
+    if (!el || ladderH <= 0) return;
+    if (el.scrollHeight <= el.clientHeight + 1) return;
+    // Count the group headers themselves, not any nested disclosure a row
+    // might own.
+    const openNow = el.querySelectorAll(':scope > div > button[aria-expanded="true"]').length;
+    // Out of groups to close and still overflowing: the headers alone do not
+    // fit, which is what the counted one-line fold exists to say.
+    if (openNow > 0) setOpenCap(openNow - 1); else setFoldToLine(true);
   });
   const [reviewBusy, setReviewBusy] = useState<string | null>(null);
   const [changesFor, setChangesFor] = useState<string | null>(null);
@@ -462,9 +521,25 @@ export function WorkPanel({ companyId }: { companyId: string }) {
           // DOM, clipped out of view, which is the silent cap the fit law
           // exists to forbid. Groups past the budget close themselves, and
           // the ranking already put the ones needing attention first.
-          const canOpen = rowsBudget === 0
-            ? present.length
+          // The prediction is the OPENING GUESS; `openCap` is the browser's
+          // correction to it. See the note on `ladderPanelRef` above.
+          // BEFORE THE MEASUREMENT ARRIVES, OPEN NOTHING.
+          //
+          // This said `rowsBudget === 0 ? present.length` — with no height
+          // yet, open EVERY group. That is the permissive reading of "I do
+          // not know how much room I have", and it is backwards: the
+          // ResizeObserver reports in a later frame, so the FIRST painted
+          // frame had all five groups expanded and overflowing. The shrink
+          // loop above corrects it, but it corrects it after that paint, and
+          // a frame of clipped headers is still a frame of clipped headers.
+          //
+          // Closed is the conservative default and costs nothing: the reset
+          // effect re-runs the moment the height lands, and the descent from
+          // the prediction happens before the next paint.
+          const predicted = rowsBudget === 0
+            ? 0
             : Math.max(1, Math.floor(rowsBudget / LADDER_ROW_PX));
+          const canOpen = Math.min(predicted, openCap);
           const autoOpen = new Set(present.slice(0, canOpen).map(([c]) => c));
           const open = (c: string) => autoOpen.has(c) && !closedGroups.has(c);
           const openCount = present.filter(([c]) => open(c)).length;
@@ -472,7 +547,11 @@ export function WorkPanel({ companyId }: { companyId: string }) {
 
           // The density gradient made real: when the window cannot even seat
           // the category headers, the whole ladder folds to ONE counted line.
-          if (ladderH > 0 && ladderH < REGION_LABEL_PX + present.length * GROUP_HEADER_PX) {
+          // `foldToLine` is the MEASURED verdict — set when every group is
+          // already closed and the headers still overflow. The constant-based
+          // test beside it stays as the cheap first pass so the common case
+          // never renders a doomed layout at all.
+          if (foldToLine || (ladderH > 0 && ladderH < REGION_LABEL_PX + present.length * GROUP_HEADER_PX)) {
             const needsYou = w.tasks.filter(needsAttention).length;
             return (
               <div style={{ ...PANEL, padding: "var(--space-3) var(--space-4)" }}>
@@ -484,7 +563,14 @@ export function WorkPanel({ companyId }: { companyId: string }) {
             );
           }
           return (
-          <div style={{ ...PANEL, padding: "var(--space-2) var(--space-4)", display: "flex", flexDirection: "column" }}>
+          <div ref={ladderPanelRef} style={{
+            ...PANEL, padding: "var(--space-2) var(--space-4)",
+            display: "flex", flexDirection: "column",
+            // Sized by the box, never by the content — the property the
+            // measurement loop above depends on, and the one whose absence
+            // let the panel grow straight through its container.
+            flex: "1 1 0", minHeight: 0, overflow: "hidden",
+          }}>
             {present.map(([cat, group]) => {
               const isOpen = open(cat);
               const attention = group.filter(needsAttention).length;
