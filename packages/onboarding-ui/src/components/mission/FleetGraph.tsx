@@ -50,6 +50,20 @@ export function FleetGraph() {
     );
   }
 
+  // "Loading" is a claim that a request is in flight. With no company
+  // selected the effect above returns before fetching anything, so `agents`
+  // stayed null and this card said "Loading fleet…" forever — about a
+  // request that was never made and never would be. An empty state has to
+  // say what the system is waiting for, and here it is waiting on the
+  // operator, not on the network.
+  if (!companyId) {
+    return (
+      <div className="card text-dim">
+        No company selected — pick one above to see its fleet.
+      </div>
+    );
+  }
+
   if (agents === null) {
     return <div className="card text-dim">Loading fleet…</div>;
   }
