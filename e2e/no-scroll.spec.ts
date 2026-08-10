@@ -262,6 +262,36 @@ test.describe("the fit law — every view fits the window", () => {
     await assertAllVisible(page, "PROBE \\d+/\\d+ unseen", "self-test cleared");
   });
 
+  /** The floor must still show the ORGANIZATION, not one sentence about it.
+   *
+   *  The ladder folds to a counted line when nothing fits, which is the right
+   *  state — but `REGION_LABEL_PX` reserved 64px for a label that renders at
+   *  29, so the fold threshold (64 + 5x34 = 234) fired at 1024x700 against
+   *  ~230 of available height while the five CLOSED headers need only 170.
+   *  Five departments collapsed into "12 deliverables across 5 departments"
+   *  when every one of them fit.
+   *
+   *  Reached by direct navigation rather than through the lens walk the
+   *  viewport tests do: those arrive with a taller ladder and never crossed
+   *  the threshold, so they cannot see this. That is why it needs its own
+   *  test — I added the assertion to the viewport loop first and it passed
+   *  with the bug reinstated, which proves only that the loop is blind to it.
+   *
+   *  ABLATION, RUN: forcing `labelPx = REGION_LABEL_PX` folds the ladder here
+   *  and fails this test. */
+  test("floor 1024x700: the ladder shows its departments rather than folding", async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 700 });
+    await page.goto(`/canvas?companyId=${CO}`);
+    await page.getByRole("button", { name: "Work", exact: true }).click();
+
+    const headers = page.getByRole("button", { name: /\d+\/\d+ done/ });
+    await expect(headers, "every department is present and counted").toHaveCount(5);
+    await expect(page.getByText(/open a desk to see them/)).toHaveCount(0);
+    // And they are all readable, not clipped into the panel's hidden overflow.
+    await assertAllVisible(page, "\\d+/\\d+ done", "floor · direct");
+    await assertFits(page, "floor · direct");
+  });
+
   test("an ephemeral workspace fits at the floor", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
     const base = `/api/instance/${CO}/canvas`;

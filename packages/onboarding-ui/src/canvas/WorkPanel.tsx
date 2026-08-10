@@ -148,6 +148,27 @@ export function WorkPanel({ companyId }: { companyId: string }) {
   // each measures its OWN share. Self-correcting — no guessed chrome math.
   const [queueRef, queueH] = useMeasuredHeight();
   const [ladderRef, ladderH] = useMeasuredHeight();
+  /** The ladder's "Deliverables" label, measured rather than guessed.
+   *
+   *  `REGION_LABEL_PX` claims 64px. The label is `--text-xs` (11px) with a
+   *  `--space-3` bottom margin, so it renders at 29 — the constant
+   *  over-reserves by 35px, which is more than a whole group header. At the
+   *  1024x700 floor that pushed `ladderH` under the fold threshold
+   *  (64 + 5x34 = 234 against ~230 available) and collapsed five departments
+   *  into one counted line, when the five closed headers need 170 and fit
+   *  with room to spare.
+   *
+   *  Measured, not re-guessed: a smaller constant would be right today and
+   *  wrong the next time the type scale moves. The constant stays as the
+   *  pre-measurement fallback, where over-reserving is the safe direction —
+   *  it opens fewer groups, never more.
+   *
+   *  Deliberately NOT applied to the review queue's `reservedPx` below, which
+   *  reserves for its own separate label. That one over-reserves too, but it
+   *  only costs a review card and the queue is not clipping; changing it
+   *  would move behaviour work.spec pins for no reason I can currently
+   *  demonstrate. */
+  const [ladderLabelRef, ladderLabelH] = useMeasuredHeight();
 
   const [busy, setBusy] = useState<"seed" | "cycle" | null>(null);
   const workQ = useQuery({
@@ -202,7 +223,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
   useLayoutEffect(() => {
     setOpenCap(Number.POSITIVE_INFINITY);
     setFoldToLine(false);
-  }, [ladderH, taskCount]);
+  }, [ladderH, ladderLabelH, taskCount]);
 
   useLayoutEffect(() => {
     const el = ladderPanelRef.current;
@@ -491,7 +512,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
           makes the allocation purely the leftover space, so the fold decision
           has no feedback path. The queue's minHeight is what protects it. */}
       <div ref={ladderRef} style={{ flex: "1 1 0", minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-        <div className="text-dim" style={LABEL}>Deliverables</div>
+        <div ref={ladderLabelRef} className="text-dim" style={LABEL}>Deliverables</div>
         {w.tasks.length === 0 && <span className="text-dim" style={{ fontSize: "var(--text-sm)" }}>Nothing queued.</span>}
         {w.tasks.length > 0 && (() => {
           // GROUPED BY CATEGORY, not by status. The status ladder answered
@@ -513,7 +534,10 @@ export function WorkPanel({ companyId }: { companyId: string }) {
           const rank = (ts: WorkTask[]) =>
             ts.some(needsAttention) ? 0 : ts.some((t) => t.status === "in_progress") ? 1 : 2;
           const present = [...byCat.entries()].sort((a, b) => rank(a[1]) - rank(b[1]) || a[0].localeCompare(b[0]));
-          const rowsBudget = regionBudget(ladderH, REGION_LABEL_PX + present.length * GROUP_HEADER_PX);
+          // The measured label, falling back to the constant only until the
+          // first measurement lands.
+          const labelPx = ladderLabelH > 0 ? ladderLabelH : REGION_LABEL_PX;
+          const rowsBudget = regionBudget(ladderH, labelPx + present.length * GROUP_HEADER_PX);
           // How many groups can be open AND still show a row each. Categories
           // are more numerous than statuses were (six departments where the
           // status ladder had four), so "open everything" starves the budget
@@ -551,7 +575,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
           // already closed and the headers still overflow. The constant-based
           // test beside it stays as the cheap first pass so the common case
           // never renders a doomed layout at all.
-          if (foldToLine || (ladderH > 0 && ladderH < REGION_LABEL_PX + present.length * GROUP_HEADER_PX)) {
+          if (foldToLine || (ladderH > 0 && ladderH < labelPx + present.length * GROUP_HEADER_PX)) {
             const needsYou = w.tasks.filter(needsAttention).length;
             return (
               <div style={{ ...PANEL, padding: "var(--space-3) var(--space-4)" }}>
