@@ -12,7 +12,7 @@ import type { StrategyDraftPatch } from "./state/build-reducer";
 import { Pillar3PromptCard } from "../wavex-os/components/inline-cards/Pillar3PromptCard";
 import { Pillar4PromptCard } from "../wavex-os/components/inline-cards/Pillar4PromptCard";
 import { Pillar5PromptCard } from "../wavex-os/components/inline-cards/Pillar5PromptCard";
-import { T2ProgressIndicator } from "../wavex-os/components/T2ProgressIndicator";
+import { WaitTrace } from "./canvas/WaitTrace";
 import type {
   Pillar1Response, Pillar4Response, Pillar5Response,
 } from "@wavex-os/plugin-onboarding";
@@ -48,7 +48,7 @@ function Slot({ slot, cb }: { slot: BuildSlot; cb: ThreadCallbacks }): ReactNode
     case "thinking":
       return (
         <div style={{ marginTop: "var(--space-2)" }}>
-          <T2ProgressIndicator active phase={slot.phase === "pillar-1" ? "pillar-1" : slot.phase} />
+          <WaitTrace active />
         </div>
       );
     case "pillar1-confirm":

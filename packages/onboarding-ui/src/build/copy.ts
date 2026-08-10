@@ -56,6 +56,28 @@ export const COPY = {
     reading: "Got it — reading your site. This usually takes 60–90 seconds.",
     describing: "Working with what you described…",
     inferred: "Here's what I inferred — adjust if anything's off.",
+
+    /** The wait, said as WORK rather than as a spinner.
+     *
+     *  The read makes these passes in this order — that ordering is a fact
+     *  about the call, not a guess. How long each pass takes is not known,
+     *  so nothing here prints a percentage, a remaining time, or an ETA: the
+     *  only number is elapsed seconds, which the client genuinely measured.
+     *  `note` is what keeps the pacing honest — it says out loud that the
+     *  order is fixed and the timing is not. */
+    wait: {
+      eyebrow: "Reading",
+      steps: [
+        "Reading your site",
+        "Figuring out what you do",
+        "Spotting your ideal customer",
+        "Pulling it together",
+      ] as readonly string[],
+      /** Every state ships a word, so the trace survives colour removal. */
+      state: { past: "passed", now: "now", ahead: "not yet" } as Record<string, string>,
+      elapsed: (s: number) => `${s}s so far`,
+      note: "The order is fixed. How long each pass takes isn't — nothing here is an estimate.",
+    },
     p3: "Now, where the product stands.",
     p4: "How you sell.",
     p5: "How the board reaches you.",

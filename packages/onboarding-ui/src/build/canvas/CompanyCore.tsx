@@ -65,14 +65,25 @@ export function CompanyCore({ companyId, pillar1, stageLabel, facePx, onAdopt, s
       />
       {facts.length > 0 && (
         <div style={{ display: "flex", gap: "var(--space-2)", flexWrap: "wrap", justifyContent: "center", maxWidth: 480 }}>
-          {facts.map((f) => (
-            <span key={f.label} style={CHIP}>
+          {/* The first findings LAND — one at a time, in the order the read
+              produced them. Nothing appears from nothing and nothing arrives
+              as a batch: the stagger is what makes the canvas visibly grow
+              at the moment pillar 1 returns. Order is stable, so a chip
+              never re-animates when a later fact (the stage line) joins. */}
+          {facts.map((f, i) => (
+            <span key={f.label} style={{ ...CHIP, animation: `wx-fact-land 320ms var(--ease) ${i * 140}ms both` }}>
               <Ic name={f.icon} size={12} color="var(--text-dim)" />
               {f.label}
             </span>
           ))}
         </div>
       )}
+      <style>{`
+        @keyframes wx-fact-land { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+        @media (prefers-reduced-motion: reduce) {
+          @keyframes wx-fact-land { from { opacity: 0; } to { opacity: 1; } }
+        }
+      `}</style>
       {showAdopt && (
         <button className="secondary" onClick={onAdopt}
           style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: "var(--text-xs)", padding: "5px 14px", minHeight: 32, borderRadius: 9 }}>
