@@ -7,6 +7,24 @@
  *  IMPLEMENTATION_PLAN.md §2.1.  Changing prices, perks, or tier IDs
  *  here will reshape the pricing screen on next render. */
 
+/** Is billing actually wired?
+ *
+ *  It is not. `POST /api/tier-subscriptions` is a stub whose own header says
+ *  so — it `console.log`s the choice, writes no row, and fires no charge. The
+ *  pricing surface said nothing about that, so an operator clicked Subscribe
+ *  on a $29/month card, got a progress state and an advance to Birth, and
+ *  had no way to learn that nothing was bought. That is a commercial
+ *  commitment asserted on the system's behalf that the system did not make,
+ *  in the middle of a flow where the operator is still deciding how much of
+ *  it to believe.
+ *
+ *  A FLAG rather than reworded copy, because the copy is only wrong while
+ *  this is false. When Stripe Checkout lands here (post-demo backlog §7.1),
+ *  flipping this one constant makes the cards say the true thing again on
+ *  every surface that renders them — the build flow's pricing phase and the
+ *  standalone /wavex-pricing page both read it from the same response. */
+export const BILLING_LIVE = false;
+
 export type TierId = "trial" | "founder" | "growth" | "custom";
 
 export interface TierConfig {

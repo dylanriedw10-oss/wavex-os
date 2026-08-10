@@ -8,7 +8,7 @@
 import { z } from "zod";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { assertBoard, assertCompanyAccess, AuthError } from "@wavex-os/auth-shim";
-import { TIERS, type TierId } from "../config/pricing.js";
+import { BILLING_LIVE, TIERS, type TierId } from "../config/pricing.js";
 
 const subscribeBody = z.object({
   orgId: z.string().min(1),
@@ -22,7 +22,11 @@ function authReq(req: FastifyRequest) {
 
 export function registerTiersRoutes(app: FastifyInstance): void {
   app.get("/api/tiers", async () => {
-    return { ok: true, tiers: TIERS };
+    // `billingLive` travels WITH the prices, so no surface can render a
+    // priced card without also receiving the fact that nothing will be
+    // charged. Shipping the flag separately (or not at all) is how the
+    // cards came to assert a purchase the stub below never makes.
+    return { ok: true, tiers: TIERS, billingLive: BILLING_LIVE };
   });
 
   app.post("/api/tier-subscriptions", async (req, reply) => {

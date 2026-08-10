@@ -80,6 +80,18 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
 
   const tiers = q.data?.tiers ?? [];
 
+  // `!== true`, not `=== false`. The flag is optional on the wire, and the
+  // cautious reading has to be the DEFAULT one: an absent flag means we do
+  // not know whether a card will be charged, and "we don't know" may not
+  // render as "yes it will".
+  const billingStub = q.data?.billingLive !== true;
+
+  // The CTA is server copy, and while billing is a stub the server's own word
+  // for it — "Subscribe" — is the false part. A button may only name what
+  // pressing it does, and pressing this records a preference.
+  const ctaFor = (t: { id: string; ctaLabel: string; displayName: string }) =>
+    billingStub ? (t.id === "trial" ? "Choose the trial" : `Choose ${t.displayName}`) : t.ctaLabel;
+
   // No `overflow: auto` and no `92vh`: the pane owns the height, and the fit
   // law allows exactly two scrollers in the product — neither is this. The
   // bottom padding that used to reserve room for a viewport-FIXED skip footer
@@ -103,6 +115,29 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
         Strategic directives to your CEO. Your WaveX Agent monitors performance and intervenes when agents drift.
       </P>
 
+      {/* Said ABOVE the prices, not in a footnote under them. The prices are
+          real numbers and the cards are real controls; what the operator
+          cannot otherwise discover is that pressing one of them buys nothing.
+          Finding that out later is what turns a stub into a broken promise. */}
+      {billingStub && (
+        <div
+          role="note"
+          style={{
+            marginTop: "0.75rem",
+            padding: "0.6rem 0.9rem",
+            border: "1px solid var(--warning)",
+            borderRadius: 8,
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--text)",
+          }}
+        >
+          <strong style={{ color: "var(--warning)" }}>Billing isn’t live yet.</strong>{" "}
+          Picking a plan records your choice so we know what you want — no card is
+          asked for and nothing is charged. Your organization is created either way.
+        </div>
+      )}
+
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -116,6 +151,8 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
             submitting={submitting === tier.id}
             disabled={submitting !== null}
             onChoose={() => void handleChoice(tier.id, "subscribe")}
+            ctaLabel={ctaFor(tier)}
+            busyLabel={billingStub ? "Saving…" : "Processing…"}
           />
         ))}
       </div>
@@ -148,7 +185,9 @@ export function Pricing({ companyId, onContinue, dialogMode = false }: PricingPr
           display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem",
         }}>
           <span className="text-dim" style={{ fontSize: 12 }}>
-            Choose a plan or skip to continue without subscription.
+            {billingStub
+              ? "Either way you keep going — nothing here is charged yet."
+              : "Choose a plan or skip to continue without subscription."}
           </span>
           <button
             type="button"
@@ -187,9 +226,15 @@ interface TierCardProps {
   submitting: boolean;
   disabled: boolean;
   onChoose: () => void;
+  /** Resolved by the parent from `billingLive` — a button may only name what
+   *  pressing it actually does. */
+  ctaLabel: string;
+  /** "Processing…" implies a transaction. While billing is a stub the only
+   *  thing in flight is a recorded preference. */
+  busyLabel: string;
 }
 
-function TierCard({ tier, submitting, disabled, onChoose }: TierCardProps) {
+function TierCard({ tier, submitting, disabled, onChoose, ctaLabel, busyLabel }: TierCardProps) {
   const isRecommended = tier.recommended;
   return (
     <div style={{
@@ -243,7 +288,7 @@ function TierCard({ tier, submitting, disabled, onChoose }: TierCardProps) {
         className={isRecommended ? "" : "secondary"}
         style={{ width: "100%" }}
       >
-        {submitting ? "Processing…" : tier.ctaLabel}
+        {submitting ? busyLabel : ctaLabel}
       </button>
     </div>
   );

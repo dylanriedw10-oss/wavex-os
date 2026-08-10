@@ -1192,6 +1192,10 @@ export const wavexOsOnboardingApi = {
         recommended: boolean;
         ctaLabel: string;
       }>;
+      /** False while `POST /api/tier-subscriptions` is a stub. Optional so an
+       *  older server that does not send it degrades to the CAUTIOUS reading
+       *  (see Pricing.tsx) rather than to a purchase claim. */
+      billingLive?: boolean;
     }>("GET", "/api/tiers"),
 
   subscribeTier: (input: {
