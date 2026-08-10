@@ -23,7 +23,17 @@ const MANIFEST = {
     pillar_3: { stage: "10k_100k_mrr" },
     pillar_4: { sales_motion: "assisted_demo", lead_sources: ["outbound_cold"] },
   },
-  goal: { metric: "mrr", current: 1000, target: 9000, days: 30 },
+  // `kpiId`, not `metric`, and the CANONICAL long id — this is what
+  // lib/goal-synthesis.ts actually stamps into company.manifest.json
+  // (`kpiId: "monthly_recurring_revenue"`). The fixture said `metric`, a
+  // field the manifest goal has never had, and it went unnoticed for as long
+  // as every consumer read it with a `?? "goal"` fallback. When goal-line.ts
+  // became the single reader and started requiring `kpiId`, `readGoal`
+  // began returning null here and the seeded goal lost its title — so this
+  // spec has been red since that fix, testing a shape the product does not
+  // produce. `stated` because the operator chose it; without it the goal is
+  // a stage-band guess and carries the estimate marker.
+  goal: { kpiId: "monthly_recurring_revenue", current: 1000, target: 9000, days: 30, stated: true },
   connector_manifest: { required: [], suggested: [], deferred: [], blocked_on_manual_approval: [] },
   swarm_manifest: {
     agents: {
@@ -53,7 +63,10 @@ test.describe("native work runtime", () => {
     await page.getByRole("button", { name: "Seed from manifest" }).click();
 
     // Goal derived from the manifest; one bootstrap task per active slot.
-    await expect(page.getByText(/mrr: 1,000 → 9,000/).first()).toBeVisible();
+    // `kpiLabel` renders the canonical id with underscores swapped for
+    // spaces, so the long id reads as prose. This used to expect "mrr:",
+    // which is the SHORT id the fixture wrongly carried.
+    await expect(page.getByText(/monthly recurring revenue: 1,000 → 9,000/).first()).toBeVisible();
     await expect(page.getByText("0/2 done")).toBeVisible();
     await expect(page.getByText("Nothing awaiting review.")).toBeVisible();
 

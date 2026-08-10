@@ -32,7 +32,9 @@ const MANIFEST = {
     pillar_3: { stage: "10k_100k_mrr" },
     pillar_4: { sales_motion: "assisted_demo", lead_sources: ["outbound_cold"] },
   },
-  goal: { metric: "mrr", current: 12000, target: 40000, days: 90 },
+  // See e2e/work.spec.ts — `metric` is a field the manifest goal does not
+  // have; the producer writes `kpiId` with the canonical long id.
+  goal: { kpiId: "monthly_recurring_revenue", current: 12000, target: 40000, days: 90, stated: true },
   connector_manifest: { required: [], suggested: [], deferred: [], blocked_on_manual_approval: [] },
   swarm_manifest: {
     agents: {
@@ -86,6 +88,68 @@ async function assertFits(page: Page, label: string) {
   expect(report.docOverflow, `${label}: the page itself must never scroll`).toBeLessThanOrEqual(1);
   expect(report.rogue, `${label}: only the record may scroll`).toEqual([]);
   expect(report.clippedPx, `${label}: content is clipped, not clamped — a silent cap`).toBeLessThanOrEqual(1);
+}
+
+/** Every element matching `pattern` must be rendered with a real box.
+ *
+ *  ONE `evaluate`, deliberately. This was written as
+ *
+ *      for (let i = 0; i < await groups.count(); i++)
+ *        await expect(groups.nth(i)).toBeVisible();
+ *
+ *  which reads the count in one round trip and each element in another, while
+ *  the panel re-renders on the work-store poll in between — the loop's own
+ *  comment names that poll. So `nth(2)` could resolve against a list that had
+ *  since shrunk and fail with "element(s) not found" under an assertion
+ *  message that said "a department header is clipped". Two different faults
+ *  wearing one label, and the flaky one fired in full-suite runs while the
+ *  spec passed in isolation.
+ *
+ *  Taking one layout snapshot removes the window entirely.
+ *
+ *  ── A REAL DEFECT THIS DOES NOT ASSERT, ON PURPOSE ───────────────────────
+ *
+ *  While fixing the race I extended this to also require CONTAINMENT inside
+ *  the nearest clipping ancestor — the thing `toBeVisible()` never tests,
+ *  since Playwright counts an element scrolled out of an `overflow: hidden`
+ *  box as visible. That version fails at all three sizes, and it is right to:
+ *  the Work ladder genuinely clips its last department headers. Measured in
+ *  the running app:
+ *
+ *    1440x900  panel client 300 / scroll 654 — content [73+112+151+151+151]
+ *    1024x700  panel client 200, five headers alone need 170 and `canOpen`
+ *              is floored at 1, so one group must open — 233 into 200
+ *
+ *  The causes are stacked: `REGION_LABEL_PX` says 64 where the label renders
+ *  at 29; the budget never reserves the panel's own padding and border; the
+ *  panel has no flex sizing so it grows with its content instead of being
+ *  bounded by its box; `LADDER_ROW_PX` (40) is the height of a row, not of an
+ *  open group (63 with its "+N more"); and before the ResizeObserver reports,
+ *  `rowsBudget === 0` opens EVERY group with `availPx: 0`, which ClampedList
+ *  reads as no limit.
+ *
+ *  I attempted that fix and backed it out: every correction moved the clip
+ *  rather than removing it, and the version that satisfied all three
+ *  viewports broke two work.spec tests that depend on the ladder opening.
+ *  Making this provably fit needs a MEASURED row height rather than another
+ *  constant, which is its own piece of work. Asserting it here would leave
+ *  three permanently-red tests; asserting only what is true keeps the gate
+ *  meaningful, and these numbers are the brief for whoever picks it up. */
+async function assertAllVisible(page: Page, pattern: string, label: string) {
+  const bad = await page.evaluate((src) => {
+    const re = new RegExp(src);
+    const out: string[] = [];
+    for (const el of [...document.querySelectorAll("button")]) {
+      const text = (el.textContent ?? "").trim();
+      if (!re.test(text)) continue;
+      const r = el.getBoundingClientRect();
+      const name = text.slice(0, 40);
+      if (r.width === 0 || r.height === 0) { out.push(`${name} — zero size`); continue; }
+      if (getComputedStyle(el).visibility === "hidden") out.push(`${name} — visibility:hidden`);
+    }
+    return out;
+  }, pattern);
+  expect(bad, `${label}: a department header did not render`).toEqual([]);
 }
 
 test.describe("the fit law — every view fits the window", () => {
@@ -145,10 +209,7 @@ test.describe("the fit law — every view fits the window", () => {
       // (Asserting visibility rather than clicking: the panel re-renders on
       // the work-store poll, so a click races the refetch for no added
       // coverage.)
-      const groups = page.getByRole("button", { name: /\d+\/\d+ done/ });
-      for (let i = 0; i < await groups.count(); i++) {
-        await expect(groups.nth(i), `${name}: a department header is clipped`).toBeVisible();
-      }
+      await assertAllVisible(page, "\\d+/\\d+ done", `${name} · Work ladder`);
 
       // A desk at L1 — masthead, hero, rows, and the sidebar previews.
       await page.goto(`/canvas?companyId=${CO}`);
@@ -163,6 +224,38 @@ test.describe("the fit law — every view fits the window", () => {
       await page.keyboard.press("Escape");
     });
   }
+
+  /** The instrument, checked against itself.
+   *
+   *  `assertAllVisible` replaced a loop that could fail for the wrong reason,
+   *  and a replacement that can only ever pass would be worse than the flake
+   *  it removed. So: render a header the operator cannot see, and require the
+   *  check to catch it. If this test ever starts passing because the check
+   *  stopped detecting anything, the assertions above have quietly become
+   *  decorative. */
+  test("the render check can actually fail", async ({ page }) => {
+    await page.goto(`/canvas?companyId=${CO}`);
+    await page.evaluate(() => {
+      const box = document.createElement("div");
+      box.id = "render-probe";
+      // Present in the DOM, zero box — exactly what a header collapsed by a
+      // starved budget looks like.
+      box.innerHTML = `<button style="visibility:hidden">PROBE 9/9 unseen</button>`;
+      document.body.appendChild(box);
+    });
+
+    let caught: unknown = null;
+    try {
+      await assertAllVisible(page, "PROBE \\d+/\\d+ unseen", "self-test");
+    } catch (e) { caught = e; }
+    expect(caught, "assertAllVisible must report an unrenderable header").not.toBeNull();
+    expect(String(caught)).toContain("PROBE 9/9 unseen");
+
+    // And it must pass again once the probe is gone — otherwise it is simply
+    // always failing, which is the opposite vacuity.
+    await page.evaluate(() => document.getElementById("render-probe")?.remove());
+    await assertAllVisible(page, "PROBE \\d+/\\d+ unseen", "self-test cleared");
+  });
 
   test("an ephemeral workspace fits at the floor", async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 700 });
