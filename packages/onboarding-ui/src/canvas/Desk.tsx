@@ -19,6 +19,7 @@ import { Medallion, ago, displayName } from "./OrgFlywheel";
 import { TASK_TONE } from "./WorkPanel";
 import { ClampedList } from "./ClampedList";
 import { regionBudget, useMeasuredHeight } from "./layout";
+import { BARE_CONTROL } from "./bare-button";
 import type {
   OrgChildRef, OrgMemoryEntry, OrgNode, OrgWalkStep,
   WorkDeliverable, WorkRunEvent, WorkTask,
@@ -207,7 +208,7 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>{rows}</div>
       {footer && (
         <button onClick={footer.onClick}
-          style={{ all: "unset", cursor: "pointer", marginTop: "var(--space-2)", fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
+          style={{ ...BARE_CONTROL, cursor: "pointer", marginTop: "var(--space-2)", fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
           {footer.text} →
         </button>
       )}
@@ -275,7 +276,7 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
               than forcing a row that would overflow the zone. */}
           {open.length > 0 && workingH > 0 && workingH - REGION_LABEL_PX < ROW_PX && (
             <button onClick={() => onOpenLens("work")}
-              style={{ all: "unset", cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-dim)", minHeight: 24 }}>
+              style={{ ...BARE_CONTROL, cursor: "pointer", fontSize: "var(--text-sm)", color: "var(--text-dim)", minHeight: 24 }}>
               {open.length} open task{open.length === 1 ? "" : "s"} · View all work →
             </button>
           )}
@@ -294,7 +295,7 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
                   <div key={t.id} style={{ borderTop: i > 0 ? "1px solid rgba(0,0,0,0.05)" : undefined }}>
                     <button onClick={() => toggleRow(t.id)} aria-expanded={expanded}
                       style={{
-                        all: "unset", boxSizing: "border-box", cursor: "pointer", width: "100%",
+                        ...BARE_CONTROL, boxSizing: "border-box", cursor: "pointer", width: "100%",
                         display: "flex", alignItems: "center", gap: "var(--space-3)",
                         padding: "14px 0", minWidth: 0, minHeight: 0,
                       }}>
@@ -339,7 +340,7 @@ export function DeskBody({ seeded, mine, allTasks, deliverables, runLog, walkSte
               }} />
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderTop: "1px solid rgba(0,0,0,0.05)" }}>
                 <button onClick={() => onOpenLens("work")}
-                  style={{ all: "unset", cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
+                  style={{ ...BARE_CONTROL, cursor: "pointer", fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
                   View all work →
                 </button>
                 {delivered > 0 && (

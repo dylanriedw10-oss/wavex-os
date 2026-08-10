@@ -18,6 +18,7 @@ import { RuntimeTray } from "./RuntimeTray";
 import { CELL_PX, InstrumentHeight, WORKSPACE_CHROME_PX, fitRows, useMeasuredHeight } from "./layout";
 import { useCellChoreography } from "./useCellChoreography";
 import type { CanvasProposal, CanvasTurn, CellSpec, LayoutSpec, OrgWalkStep, SinceSnapshot } from "./contract";
+import { BARE_CONTROL } from "./bare-button";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 const MAX_MESSAGE_LEN = 1500; // mirrors the server's postSchema cap
@@ -537,7 +538,7 @@ export default function CanvasPage() {
                 <span className="cv-glass cv-glass--fluid" style={{ display: "inline-flex", alignItems: "center", gap: 8, borderRadius: 999, padding: "3px 6px 3px 12px", fontSize: "var(--text-xs)", color: "var(--mind)" }}>
                   asking: {orgScope.title}
                   <button onClick={() => setOrgScope(null)} aria-label={`Stop asking ${orgScope.title}`}
-                    style={{ all: "unset", cursor: "pointer", padding: "2px 6px", color: "var(--text-dim)", minHeight: 0 }}>✕</button>
+                    style={{ ...BARE_CONTROL, cursor: "pointer", padding: "2px 6px", color: "var(--text-dim)", minHeight: 0 }}>✕</button>
                 </span>
               </div>
             )}
@@ -703,13 +704,13 @@ export default function CanvasPage() {
                           background: "var(--panel)", border: "1px solid rgba(0,0,0,0.08)",
                         }}>
                           <button onClick={() => void restorePin(p.signature)}
-                            style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 4px 6px 12px", fontSize: "var(--text-xs)", fontWeight: 600, color: "var(--text)", minHeight: 0 }}>
+                            style={{ ...BARE_CONTROL, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 4px 6px 12px", fontSize: "var(--text-xs)", fontWeight: 600, color: "var(--text)", minHeight: 0 }}>
                             <Ic name="pin" size={13} color="var(--text-dim)" />
                             {p.title}
                           </button>
                           <button onClick={() => void unpin(p.signature)}
                             aria-label={`Unpin ${p.title}`}
-                            style={{ all: "unset", cursor: "pointer", padding: "6px 10px 6px 6px", color: "var(--text-dim)", fontSize: "var(--text-xs)", minHeight: 0 }}>
+                            style={{ ...BARE_CONTROL, cursor: "pointer", padding: "6px 10px 6px 6px", color: "var(--text-dim)", fontSize: "var(--text-xs)", minHeight: 0 }}>
                             ×
                           </button>
                         </span>

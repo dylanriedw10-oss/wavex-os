@@ -11,6 +11,7 @@
 
 import type { ReactNode } from "react";
 import { fitRows, useInstrumentHeight, type FitOpts } from "./layout";
+import { BARE_CONTROL } from "./bare-button";
 
 export function ClampedList<T>({
   items, rowPx, render, onMore, moreLabel, availPx, countInHeader, ...fit
@@ -43,7 +44,7 @@ export function ClampedList<T>({
         onMore ? (
           <button onClick={onMore}
             style={{
-              all: "unset", cursor: "pointer", minHeight: 24, padding: "2px 0",
+              ...BARE_CONTROL, cursor: "pointer", minHeight: 24, padding: "2px 0",
               fontSize: "var(--text-xs)", color: "var(--text-dim)",
             }}>
             {moreLabel ? moreLabel(hidden, items.length) : `+${hidden} more →`}

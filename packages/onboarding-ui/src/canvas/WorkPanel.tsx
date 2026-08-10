@@ -14,6 +14,7 @@ import { wavexOsOnboardingApi, ApiError } from "../wavex-os/lib/api";
 import { ClampedList } from "./ClampedList";
 import { regionBudget, useMeasuredHeight } from "./layout";
 import type { WorkDeliverable, WorkStateResponse, WorkTask, WorkTaskStatus } from "./contract";
+import { BARE_CONTROL } from "./bare-button";
 
 /** A region's own label (spec Rev 10). Everything else is measured. */
 const REGION_LABEL_PX = 64;
@@ -382,7 +383,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
                     {d.output}
                   </pre>
                   <button onClick={() => toggleOutput(d.id)} aria-expanded={openOutput.has(d.id)}
-                    style={{ all: "unset", cursor: "pointer", marginTop: 4, fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
+                    style={{ ...BARE_CONTROL, cursor: "pointer", marginTop: 4, fontSize: "var(--text-xs)", color: "var(--text-dim)", minHeight: 24 }}>
                     {openOutput.has(d.id) ? "Collapse output" : "Show full output"}
                   </button>
                   <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-3)", alignItems: "center", flexWrap: "wrap" }}>
@@ -492,7 +493,7 @@ export function WorkPanel({ companyId }: { companyId: string }) {
               return (
                 <div key={cat}>
                   <button onClick={() => toggleGroup(cat)} aria-expanded={isOpen}
-                    style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, minHeight: 34, width: "100%" }}>
+                    style={{ ...BARE_CONTROL, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, minHeight: 34, width: "100%" }}>
                     <span style={{ fontSize: "var(--text-sm)", fontWeight: 600 }}>{displayName(cat)}</span>
                     {/* Counted progress, never a percentage: done/total is
                         real store state. A per-deliverable percentage would

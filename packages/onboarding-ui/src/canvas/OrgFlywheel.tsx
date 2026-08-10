@@ -22,6 +22,7 @@ import { DeskBody, MiniOrgChart } from "./Desk";
 import { ClampedList } from "./ClampedList";
 import { WHEEL_BASE, useInstrumentHeight, useMeasuredHeight, wheelScale } from "./layout";
 import type { CellSpec, OrgNode, OrgWalkStep } from "./contract";
+import { BARE_CONTROL } from "./bare-button";
 
 /** The wheel's own caption line, which lives INSIDE the measured face region
  *  (spec Rev 10). Everything else about L0's budget is measured. */
@@ -147,7 +148,7 @@ function Stratum({ label, count, open, onToggle, children }: {
   return (
     <div style={{ marginTop: "var(--space-4)", maxWidth: 720 }}>
       <button onClick={onToggle} aria-expanded={open}
-        style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, minHeight: 28 }}>
+        style={{ ...BARE_CONTROL, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, minHeight: 28 }}>
         <span className="text-dim" style={{ fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: ".1em" }}>{label}</span>
         <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>{count}</span>
         <span className="text-dim" aria-hidden style={{
@@ -864,7 +865,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
               <button key={`w-${v.key}`} aria-label={v.label} aria-pressed={false}
                 onClick={() => setView(v.key)}
                 style={{
-                  all: "unset", cursor: "pointer", minHeight: 32, padding: "4px 6px",
+                  ...BARE_CONTROL, cursor: "pointer", minHeight: 32, padding: "4px 6px",
                   fontSize: "var(--text-xs)", color: "var(--text-dim)",
                   display: "inline-flex", alignItems: "center", gap: 6,
                 }}>
@@ -1041,7 +1042,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
                   <button key={m.id} onClick={() => onAsk(m.question, m.nodeId)}
                     aria-label={`Ask again at ${m.nodeId}: ${m.question}`}
                     style={{
-                      all: "unset", cursor: "pointer", display: "flex", alignItems: "center",
+                      ...BARE_CONTROL, cursor: "pointer", display: "flex", alignItems: "center",
                       gap: "var(--space-3)", padding: "8px 6px", borderRadius: "var(--radius-sm)", minHeight: 0,
                     }}>
                     <Ic name={g.icon} size={14} color={g.hue} />
@@ -1099,7 +1100,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
                 return (
                   <div key={r.nodeId} style={{ display: "grid", gridTemplateColumns: "170px 1fr 44px", gap: "var(--space-3)", alignItems: "center" }}>
                     <button className="secondary" onClick={() => onNavigate(r.nodeId)}
-                      style={{ all: "unset", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      style={{ ...BARE_CONTROL, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                       <Ic name={g.icon} size={14} color={g.hue} />
                       <span style={{ fontSize: "var(--text-sm)", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {displayName(r.title)}
@@ -1153,7 +1154,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
               const g = glyphFor(other, other.replace(/^(dept|agent):/, ""));
               return (
                 <button key={`${e.from}-${e.to}`} onClick={() => onNavigate(other)}
-                  style={{ all: "unset", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-sm)", minHeight: 0 }}>
+                  style={{ ...BARE_CONTROL, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, fontSize: "var(--text-sm)", minHeight: 0 }}>
                   <Ic name={g.icon} size={13} color={g.hue} />
                   <span style={{ fontWeight: 600 }}>{displayName(other.replace(/^(dept|agent|metric):/, ""))}</span>
                   <span className="text-dim" style={{ fontSize: "var(--text-xs)" }}>
@@ -1197,7 +1198,7 @@ export function OrgView({ companyId, nodeId, onNavigate, onAsk, walk }: {
                 <button key={c.id} onClick={() => onNavigate(c.id)} className="cv-lift"
                   title={`${displayName(c.title)} — ${KIND_LABEL[c.kind]}`}
                   aria-label={`${displayName(c.title)} ${KIND_LABEL[c.kind]}`}
-                  style={{ all: "unset", cursor: "pointer", display: "inline-flex", minHeight: 0, borderRadius: 10 }}>
+                  style={{ ...BARE_CONTROL, cursor: "pointer", display: "inline-flex", minHeight: 0, borderRadius: 10 }}>
                   <Medallion icon={nodeIcon(c)} hue={hueFor(c.id, c.kind)} size={34} />
                 </button>
               ))}

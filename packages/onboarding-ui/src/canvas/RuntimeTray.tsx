@@ -22,6 +22,7 @@ import { ago, displayName } from "./OrgFlywheel";
 import { ClampedList } from "./ClampedList";
 import { regionBudget, useMeasuredHeight } from "./layout";
 import type { OrgWalkStep, WorkStateResponse } from "./contract";
+import { BARE_CONTROL } from "./bare-button";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -96,7 +97,7 @@ export function RuntimeTray({ open, onClose, work, walk }: {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: "var(--text-lg)", fontWeight: 650, letterSpacing: "-0.01em" }}>Runtime</span>
           <button onClick={onClose} aria-label="Close runtime"
-            style={{ all: "unset", cursor: "pointer", padding: "4px 8px", color: "var(--text-dim)", fontSize: "var(--text-base)", minHeight: 0 }}>✕</button>
+            style={{ ...BARE_CONTROL, cursor: "pointer", padding: "4px 8px", color: "var(--text-dim)", fontSize: "var(--text-base)", minHeight: 0 }}>✕</button>
         </div>
 
         {work === null && (

@@ -14,6 +14,7 @@ import { useQuery } from "@tanstack/react-query";
 import { wavexOsOnboardingApi } from "../../wavex-os/lib/api";
 import { Ic } from "../../canvas/icons";
 import { COPY } from "../copy";
+import { BARE_CONTROL } from "../../canvas/bare-button";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -108,7 +109,7 @@ export function ConnectorConstellation({ companyId, companyTitle, onOpenDrawer, 
               aria-label={`${m.connectorId} — ${done ? "wired" : "not wired yet"}`}
               title={m.rationale}
               style={{
-                all: "unset", cursor: "pointer", position: "absolute",
+                ...BARE_CONTROL, cursor: "pointer", position: "absolute",
                 left: x - 34, top: y - 26, width: 68, textAlign: "center",
                 display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
                 // Condensation: everything glides to the core and fades —
