@@ -53,8 +53,21 @@ export const COPY = {
   },
 
   phase1: {
-    reading: "Got it — reading your site. This usually takes 60–90 seconds.",
-    describing: "Working with what you described…",
+    /** The two openings, chosen by whether the operator gave an ADDRESS.
+     *
+     *  `describing` was unreachable: `runPillar1` picked it on the presence
+     *  of a `manualContext` argument that no call site ever passed, so
+     *  `reading` fired for everyone — and an operator who typed a sentence
+     *  about their company was told the product was reading a site they had
+     *  never given it. That is the first thing this product says.
+     *
+     *  The 60–90s estimate is gone from both. The wait trace directly under
+     *  this line prints MEASURED elapsed seconds and states in its own note
+     *  that "nothing here is an estimate"; a guessed duration one line above
+     *  it was contradicting its own instrument. (The figure was also wrong:
+     *  the enrichment call measures ~20s.) */
+    reading: "Got it — reading your site now.",
+    describing: "Got it — working from what you told me.",
     inferred: "Here's what I inferred — adjust if anything's off.",
 
     /** The wait, said as WORK rather than as a spinner.
@@ -67,12 +80,27 @@ export const COPY = {
      *  order is fixed and the timing is not. */
     wait: {
       eyebrow: "Reading",
-      steps: [
-        "Reading your site",
-        "Figuring out what you do",
-        "Spotting your ideal customer",
-        "Pulling it together",
-      ] as readonly string[],
+      /** The passes, in the order the call makes them — and the FIRST one
+       *  depends on what the operator gave us. A pasted address is fetched;
+       *  typed prose is not. The old single list said "Reading your site" to
+       *  everyone and then marked it `passed`, which is this trace asserting
+       *  a fetch that never happened — the exact thing its own header
+       *  promises it will not do. Passes two through four are identical
+       *  because the model does the same work on either input. */
+      steps: {
+        url: [
+          "Reading your site",
+          "Figuring out what you do",
+          "Spotting your ideal customer",
+          "Pulling it together",
+        ],
+        text: [
+          "Reading what you told me",
+          "Figuring out what you do",
+          "Spotting your ideal customer",
+          "Pulling it together",
+        ],
+      } as Record<string, readonly string[]>,
       /** Every state ships a word, so the trace survives colour removal. */
       state: { past: "passed", now: "now", ahead: "not yet" } as Record<string, string>,
       elapsed: (s: number) => `${s}s so far`,

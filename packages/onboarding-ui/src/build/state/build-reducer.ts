@@ -25,7 +25,10 @@ import type { AssemblyRunState } from "../../canvas/plan-contract";
 export type ChatRole = "user" | "assistant" | "system";
 
 export type BuildSlot =
-  | { kind: "thinking"; phase: "pillar-1" | "phase-2" | "finalize" }
+  /** `source` records what the operator actually gave us, so the wait trace
+   *  can narrate the passes that will really happen. Optional because only
+   *  pillar-1 branches on it. */
+  | { kind: "thinking"; phase: "pillar-1" | "phase-2" | "finalize"; source?: "url" | "text" }
   | { kind: "pillar1-confirm"; response: Pillar1Response }
   | { kind: "pillar1-halt"; operatorMessage: string }
   | { kind: "strategy-prompt"; hypothesis: string | null }

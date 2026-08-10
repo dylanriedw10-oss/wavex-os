@@ -39,7 +39,16 @@ const REDUCE =
   typeof window !== "undefined" &&
   window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-export function WaitTrace({ active }: { active: boolean }) {
+export function WaitTrace({ active, source = "text" }: {
+  active: boolean;
+  /** What the operator gave us. Decides the FIRST pass only — a pasted
+   *  address is fetched and a typed sentence is not, and this trace marks
+   *  each pass `passed` as it scrolls by, so naming a fetch that never
+   *  happened is the one lie this component is built to avoid.
+   *
+   *  Defaults to "text" because that is the claim-less option. */
+  source?: "url" | "text";
+}) {
   const [ms, setMs] = useState(0);
 
   useEffect(() => {
@@ -50,7 +59,7 @@ export function WaitTrace({ active }: { active: boolean }) {
     return () => window.clearInterval(t);
   }, [active]);
 
-  const steps = COPY.phase1.wait.steps;
+  const steps = COPY.phase1.wait.steps[source] ?? COPY.phase1.wait.steps.text!;
   const current = Math.min(steps.length - 1, Math.floor(ms / STEP_MS));
   const seconds = Math.floor(ms / 1000);
 

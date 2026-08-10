@@ -37,10 +37,26 @@ import { Pricing } from "../wavex-os/pricing/Pricing";
 
 const REDUCE = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
+/** The one URL-or-hostname heuristic. It already existed inside `deriveSlug`;
+ *  it is lifted out because a SECOND consumer needs the same answer and two
+ *  copies of a heuristic is how the copy and the slug end up disagreeing
+ *  about the same sentence. */
+const HOSTNAME_RE = /(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i;
+
+/** Did the operator give us an ADDRESS, or did they describe the company?
+ *
+ *  This is the whole of what the client knows before the response comes
+ *  back, and it is enough: the server only attempts a fetch when there is
+ *  something to fetch. Every claim made during the wait must rest on this
+ *  and nothing else. */
+export function looksLikeUrl(rawInput: string): boolean {
+  return HOSTNAME_RE.test(rawInput.trim());
+}
+
 /** URL-or-hostname heuristic → slug seed (ported from the legacy shell). */
 function deriveSlug(rawInput: string): string {
   const trimmed = rawInput.trim();
-  const urlMatch = trimmed.match(/(?:https?:\/\/)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)/i);
+  const urlMatch = trimmed.match(HOSTNAME_RE);
   if (urlMatch) {
     const host = urlMatch[1].replace(/^www\./i, "");
     return slugifyCompanyId(host.split(".")[0] ?? host);
@@ -90,12 +106,27 @@ export default function BuildOrgPage() {
   const runPillar1 = useCallback(async (slug: string, rawInput: string, manualContext?: string) => {
     const thinkingId = `thinking-${Date.now().toString(36)}`;
     setBusy(true);
+    // Derived from the INPUT, not from the `manualContext` argument.
+    //
+    // The old condition was `manualContext ? describing : reading`, and no
+    // call site has ever passed a third argument — so `describing` was dead
+    // code and every operator, including one who typed a plain sentence
+    // about their company, was told "reading your site". Nothing was being
+    // read. The address is the only thing that makes a fetch possible, so
+    // the presence of an address is the only thing that licenses the claim.
+    //
+    // Deliberately NOT fixed by passing the prose as `manual_context`, which
+    // is what it looks like the argument is for: the server treats that field
+    // as a signal to skip T2 enrichment entirely (routes/pillars.ts:352-359),
+    // so wiring it up to fix a sentence would have quietly downgraded the
+    // inference for every operator who types rather than pastes.
+    const fromUrl = looksLikeUrl(rawInput);
     dispatch({
       type: "ADD_MESSAGE",
       message: {
         id: thinkingId, role: "assistant",
-        text: manualContext ? COPY.phase1.describing : COPY.phase1.reading,
-        slot: { kind: "thinking", phase: "pillar-1" },
+        text: fromUrl && !manualContext ? COPY.phase1.reading : COPY.phase1.describing,
+        slot: { kind: "thinking", phase: "pillar-1", source: fromUrl ? "url" : "text" },
       },
     });
     try {

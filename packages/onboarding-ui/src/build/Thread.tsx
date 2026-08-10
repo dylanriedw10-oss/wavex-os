@@ -48,7 +48,10 @@ function Slot({ slot, cb }: { slot: BuildSlot; cb: ThreadCallbacks }): ReactNode
     case "thinking":
       return (
         <div style={{ marginTop: "var(--space-2)" }}>
-          <WaitTrace active />
+          {/* `text` is the safe default: it claims strictly less. A slot
+              persisted before `source` existed replays as prose rather than
+              asserting a fetch nobody recorded. */}
+          <WaitTrace active source={slot.source ?? "text"} />
         </div>
       );
     case "pillar1-confirm":
